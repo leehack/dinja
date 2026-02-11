@@ -136,4 +136,97 @@ void main() {
       expect(JinjaMap({'a': const JinjaInteger(1)}).toDart(), {'a': 1});
     });
   });
+
+  group('JinjaValue Coverage', () {
+    test('JinjaInteger', () {
+      final v = JinjaInteger(42);
+      expect(v.value, 42);
+      expect(v.asInt, 42);
+      expect(v.asDouble, 42.0);
+      expect(v.asBool, true);
+      expect(v.isNumeric, true);
+      expect(v.toString(), '42');
+
+      final z = JinjaInteger(0);
+      expect(z.asBool, false);
+    });
+
+    test('JinjaFloat', () {
+      final v = JinjaFloat(3.14);
+      expect(v.value, 3.14);
+      expect(v.asDouble, 3.14);
+      expect(v.asInt, 3);
+      expect(v.asBool, true);
+      expect(v.isNumeric, true);
+      expect(v.toString(), '3.14');
+
+      final z = JinjaFloat(0.0);
+      expect(z.asBool, false);
+    });
+
+    test('JinjaBoolean', () {
+      final t = JinjaBoolean(true);
+      expect(t.value, true);
+      expect(t.asBool, true);
+      expect(t.asInt, 1);
+      expect(t.asDouble, 1.0);
+      expect(t.toString(), 'True');
+
+      final f = JinjaBoolean(false);
+      expect(f.value, false);
+      expect(f.asBool, false);
+      expect(f.asInt, 0);
+      expect(f.asDouble, 0.0);
+      expect(f.toString(), 'False');
+    });
+
+    test('JinjaStringValue', () {
+      final s = JinjaStringValue.fromString('hello');
+      expect(s.value.toString(), 'hello');
+      expect(s.asBool, true);
+
+      final empty = JinjaStringValue.fromString('');
+      expect(empty.asBool, false);
+
+      // Numeric conversion from string - BASE implementation throws
+      expect(() => JinjaStringValue.fromString('123').asInt, throwsException);
+      expect(
+        () => JinjaStringValue.fromString('12.5').asDouble,
+        throwsException,
+      );
+
+      expect(() => s.asInt, throwsException);
+    });
+
+    test('JinjaList', () {
+      final l = JinjaList([JinjaInteger(1)]);
+      expect(l.isList, true);
+      expect(l.asBool, true);
+      expect(l.items.length, 1);
+
+      final empty = JinjaList([]);
+      expect(empty.asBool, false);
+    });
+
+    test('JinjaMap', () {
+      final m = JinjaMap({'a': JinjaInteger(1)});
+      expect(m.isMap, true);
+      expect(m.asBool, true);
+
+      final empty = JinjaMap({});
+      expect(empty.asBool, false);
+    });
+
+    test('JinjaUndefined and JinjaNone', () {
+      final u = const JinjaUndefined();
+      expect(u.isUndefined, true);
+      expect(u.asBool, false);
+      expect(u.toString(), '');
+
+      final n = const JinjaNone();
+      expect(n.isNone, true);
+      expect(n.asBool, false);
+      expect(n.toString(), 'None');
+    });
+  });
 }
