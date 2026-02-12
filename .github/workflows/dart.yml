@@ -1,0 +1,54 @@
+name: Dart
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze project source
+        run: dart analyze
+
+      - name: Run tests with coverage
+        run: |
+          dart pub global activate coverage
+          dart test --coverage=coverage
+          dart pub global run coverage:format_coverage --lcov --in=coverage --out=coverage/lcov.info --report-on=lib
+
+      - name: Verify Coverage (>= 80%)
+        run: dart script/verify_coverage.dart coverage/lcov.info 80
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/lcov.info
+          fail_ci_if_error: true
+
+      - name: Install Pana
+        run: dart pub global activate pana
+
+      - name: Run Pana Verification
+        run: |
+          dart pub global run pana . --no-warning --json > pana_report.json
+          dart script/verify_pana_score.dart
+
+      - name: Publish Dry Run
+        run: dart pub publish --dry-run
