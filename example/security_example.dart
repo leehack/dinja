@@ -18,21 +18,10 @@ void main() {
 
   // 3. Mark as safe (if you trust the source)
   print('\n3. Marked as safe (raw html):');
+  // Use JinjaString.from with isSafe: true to mark content as trusted
   final safeString = JinjaString.from(unsafeInput, isSafe: true);
-  // Or simply passing it as a trusted string if your logic allows
-  // Here we simulate passing a marked safe string
-  final outputSafe = template.render({
-    'name': JinjaStringValue(safeString).toDart(),
-  });
-  print('Matches safe output: ${outputSafe == unsafeInput}');
-  // Note: toDart() unwraps to string, so if we want to pass the wrapper we need to use
-  // custom mechanics or just reliance on the fact that strings are inputs by default.
-  // Wait, `render` converts values using `val()`.
-  // `val()` wraps strings in `JinjaString.user(v)`.
-  // If we want to pass a safe string, we should likely pass a JinjaString directly if allowed?
-  // Let's check `val()` implementation in `value.dart`.
-  // It handles `JinjaString`!
 
-  final outputTrusted = template.render({'name': safeString});
-  print(outputTrusted);
+  // Pass the JinjaString directly to render
+  final outputSafe = template.render({'name': safeString});
+  print(outputSafe);
 }
