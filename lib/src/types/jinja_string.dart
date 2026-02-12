@@ -199,6 +199,33 @@ class JinjaString {
     return substring(index, index + 1);
   }
 
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is JinjaString &&
+          isSafe == other.isSafe &&
+          parts.length == other.parts.length &&
+          _partsListEqual(parts, other.parts);
+
+  static bool _partsListEqual(
+    List<JinjaStringPart> a,
+    List<JinjaStringPart> b,
+  ) {
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode {
+    int h = isSafe.hashCode;
+    for (final p in parts) {
+      h ^= p.hashCode;
+    }
+    return h;
+  }
+
   /// Returns a new JinjaString with special characters escaped.
   JinjaString escape() {
     if (isSafe) return this;

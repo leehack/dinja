@@ -7,6 +7,12 @@ import 'jinja_string.dart';
 abstract class JinjaValue {
   const JinjaValue();
 
+  /// Whether this value is the special 'env' object.
+  bool get isEnv => false;
+
+  /// Optional name for this value (e.g. 'env').
+  String? get name => null;
+
   /// Returns the type name for debugging and error messages (e.g., 'String', 'List').
   String get typeName;
 
@@ -42,6 +48,10 @@ abstract class JinjaValue {
   List<JinjaValue> get asList => throw Exception('$typeName is not a list');
   Map<String, JinjaValue> get asMap =>
       throw Exception('$typeName is not a map');
+
+  /// Returns a custom attribute of this value, or null if not found.
+  /// Used for objects like `loop` that expose properties but aren't maps.
+  JinjaValue? getAttribute(String name) => null;
 
   /// Converts this JinjaValue to a raw Dart object (Map, List, String, etc.).
   Object? toDart() {
@@ -139,7 +149,7 @@ class JinjaBoolean extends JinjaValue {
   }
 
   @override
-  int get hashCode => value.hashCode;
+  int get hashCode => (value ? 1.0 : 0.0).hashCode;
 
   @override
   String toString() => value ? 'True' : 'False';
@@ -177,7 +187,7 @@ class JinjaInteger extends JinjaValue {
   }
 
   @override
-  int get hashCode => value.hashCode;
+  int get hashCode => value.toDouble().hashCode;
 
   @override
   String toString() => value.toString();
@@ -258,10 +268,11 @@ class JinjaStringValue extends JinjaValue {
 
   @override
   bool operator ==(Object other) =>
-      other is JinjaStringValue && value.toString() == other.value.toString();
+      identical(this, other) ||
+      other is JinjaStringValue && value == other.value;
 
   @override
-  int get hashCode => value.toString().hashCode;
+  int get hashCode => value.hashCode;
 
   @override
   String toString() => value.toString();
@@ -289,6 +300,7 @@ class JinjaList extends JinjaValue {
 
   @override
   bool operator ==(Object other) {
+    if (identical(this, other)) return true;
     if (other is! JinjaList) return false;
     if (items.length != other.items.length) return false;
     for (int i = 0; i < items.length; i++) {
@@ -298,7 +310,13 @@ class JinjaList extends JinjaValue {
   }
 
   @override
-  int get hashCode => Object.hashAll(items);
+  int get hashCode {
+    int h = 0;
+    for (final i in items) {
+      h ^= i.hashCode;
+    }
+    return h;
+  }
 
   @override
   String toString() {
@@ -310,9 +328,14 @@ class JinjaList extends JinjaValue {
 }
 
 class JinjaMap extends JinjaValue {
-  final Map<String, JinjaValue> items;
+  final Map<JinjaValue, JinjaValue> items;
+  @override
+  final String? name;
 
-  const JinjaMap(this.items);
+  const JinjaMap(this.items, {this.name});
+
+  @override
+  bool get isEnv => name == 'env';
 
   @override
   String get typeName => 'Map';
@@ -321,52 +344,60 @@ class JinjaMap extends JinjaValue {
   bool get asBool => items.isNotEmpty;
 
   @override
-  Map<String, JinjaValue> get asMap => items;
+  Map<String, JinjaValue> get asMap =>
+      items.map((k, v) => MapEntry(k.toString(), v));
+
+  Map<JinjaValue, JinjaValue> get asJinjaMap => items;
 
   @override
   bool get isMap => true;
 
   @override
   bool operator ==(Object other) {
+    if (identical(this, other)) return true;
     if (other is! JinjaMap) return false;
     if (items.length != other.items.length) return false;
     for (final key in items.keys) {
+      if (!other.items.containsKey(key)) return false;
       if (items[key] != other.items[key]) return false;
     }
     return true;
   }
 
   @override
-  int get hashCode => Object.hashAll(items.keys) ^ Object.hashAll(items.values);
+  int get hashCode {
+    int h = 0;
+    for (final entry in items.entries) {
+      h ^= Object.hash(entry.key, entry.value);
+    }
+    return h;
+  }
 
   @override
   String toString() {
-    return '{${items.entries.map((e) => '${_repr(e.key)}: ${e.value.asRepr}').join(', ')}}';
-  }
-
-  String _repr(String s) {
-    return "'${s.replaceAll("'", "\\'")}'";
+    return '{${items.entries.map((e) => '${e.key.asRepr}: ${e.value.asRepr}').join(', ')}}';
   }
 
   @override
-  Object? toDart() => items.map((k, v) => MapEntry(k, v.toDart()));
+  Object? toDart() => items.map((k, v) => MapEntry(k.toDart(), v.toDart()));
 }
 
 // Helper to create values easily
 JinjaValue val(Object? v) {
   if (v == null) return const JinjaNone();
   if (v is JinjaValue) return v;
+  if (v is JinjaString) return JinjaStringValue(v);
   if (v is bool) return JinjaBoolean(v);
   if (v is int) return JinjaInteger(v);
   if (v is double) return JinjaFloat(v);
-  if (v is String) return JinjaStringValue(JinjaString.user(v));
-  if (v is JinjaString) return JinjaStringValue(v);
-  if (v is List) return JinjaList(v.map((e) => val(e)).toList());
-  if (v is Map) {
-    return JinjaMap(v.map((k, v) => MapEntry(k.toString(), val(v))));
+  if (v is String) return JinjaStringValue.fromString(v);
+  if (v is List) {
+    return JinjaList(v.map(val).toList());
   }
-
-  throw Exception('Unsupported type for auto-conversion: ${v.runtimeType}');
+  if (v is Map) {
+    return JinjaMap(v.map((k, v) => MapEntry(val(k), val(v))));
+  }
+  return JinjaStringValue.fromString(v.toString());
 }
 
 class JinjaTuple extends JinjaValue {
@@ -388,6 +419,7 @@ class JinjaTuple extends JinjaValue {
 
   @override
   bool operator ==(Object other) {
+    if (identical(this, other)) return true;
     if (other is! JinjaTuple) return false;
     if (items.length != other.items.length) return false;
     for (int i = 0; i < items.length; i++) {
@@ -397,7 +429,13 @@ class JinjaTuple extends JinjaValue {
   }
 
   @override
-  int get hashCode => Object.hashAll(items);
+  int get hashCode {
+    int h = 0;
+    for (final i in items) {
+      h ^= i.hashCode;
+    }
+    return h;
+  }
 
   @override
   String toString() {
@@ -408,10 +446,31 @@ class JinjaTuple extends JinjaValue {
   Object? toDart() => items.map((e) => e.toDart()).toList();
 }
 
+class JinjaLoopContext extends JinjaValue {
+  final Map<String, JinjaValue> state;
+  const JinjaLoopContext(this.state);
+
+  @override
+  String get typeName => 'LoopContext';
+
+  @override
+  bool get asBool => true;
+
+  @override
+  JinjaValue? getAttribute(String name) => state[name];
+
+  @override
+  String toString() => '<loop context>';
+
+  @override
+  Object? toDart() => state;
+}
+
 typedef JinjaFunctionHandler =
     JinjaValue Function(List<JinjaValue> args, Map<String, JinjaValue> kwargs);
 
 class JinjaFunction extends JinjaValue {
+  @override
   final String name;
   final JinjaFunctionHandler handler;
 

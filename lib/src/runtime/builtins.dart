@@ -5,19 +5,27 @@ import 'dart:math' as math;
 import 'dart:convert';
 
 // Global built-ins map
-final Map<String, JinjaFunctionHandler> globalBuiltins = {
-  // Functions & Filters
+// Global registries
+final Map<String, JinjaFunctionHandler> globalFunctions = {
   'range': _range,
-  'tojson': _tojson,
-  'json_encode': _tojson, // Alias
-  'slice': _slice,
   'dict': _dict,
   'list': _list,
   'int': _int,
   'float': _float,
   'str': _str,
-  'len': _len, // Python style
-  'length': _len, // Jinja style
+  'namespace': _namespace,
+  'strftime_now': _strftime_now,
+  'raise_exception': _raiseException,
+};
+
+final Map<String, JinjaFunctionHandler> globalFilters = {
+  'tojson': _tojson,
+  'json_encode': _tojson,
+  'slice': _slice,
+  'int': _int,
+  'float': _float,
+  'str': _str,
+  'length': _len,
   'count': _len,
   'first': _first,
   'last': _last,
@@ -27,62 +35,165 @@ final Map<String, JinjaFunctionHandler> globalBuiltins = {
   'abs': _abs,
   'round': _round,
   'default': _default,
-  'd': _default, // Alias
+  'd': _default,
   'sort': _sort,
   'unique': _unique,
   'reverse': _reverse,
   'map': _map,
+  'select': _select,
+  'reject': _reject,
   'selectattr': _selectattr,
   'rejectattr': _rejectattr,
   'attr': _attr,
   'join': _join,
   'safe': _safe,
-  'items': _items, // dict items as filter
+  'items': _items,
   'keys': _keys,
   'values': _values,
   'strip': _strip,
   'trim': _strip,
   'lstrip': _lstrip,
   'rstrip': _rstrip,
-  'namespace': _namespace,
-  'raise_exception': _raiseException,
-
-  // Tests (prefixed with test_is_)
-  'test_is_defined': _testIsDefined,
-  'test_is_undefined': _testIsUndefined,
-  'test_is_none': _testIsNone,
-  'test_is_boolean': _testIsBoolean,
-  'test_is_integer': _testIsInteger,
-  'test_is_float': _testIsFloat,
-  'test_is_string': _testIsString,
-  'test_is_number': _testIsNumber,
-  'test_is_iterable': _testIsIterable,
-  'test_is_sequence': _testIsSequence,
-  'test_is_mapping': _testIsMapping,
-  'test_is_startingwith': _testIsStartingWith,
-  'test_is_endingwith': _testIsEndingWith,
-  'test_is_equalto': _testIsEqualTo,
-  'test_is_eq': _testIsEqualTo,
-  'test_is_ieq': _testIsIequalTo,
-  'test_is_ne': _testIsNotEqualTo,
-  'test_is_gt': _testIsGreaterThan,
-  'test_is_ge': _testIsGreaterThanOrEqual,
-  'test_is_lt': _testIsLessThan,
-  'test_is_le': _testIsLessThanOrEqual,
-  'test_is_in': _testIsIn,
-  'test_is_odd': _testIsOdd,
-  'test_is_even': _testIsEven,
   'dictsort': _dictsort,
   'upper': _upper,
   'lower': _lower,
   'indent': _indent,
   'string': _string,
-  'strftime_now': _strftime_now,
-
-  'test_is_true': _testIsTrue,
-  'test_is_false': _testIsFalse,
+  'title': (args, kwargs) =>
+      (_resolveStringMember(
+                args.isNotEmpty && args[0] is JinjaStringValue
+                    ? args[0] as JinjaStringValue
+                    : JinjaStringValue.fromString(
+                        args.isNotEmpty ? args[0].toString() : '',
+                      ),
+                'title',
+              )
+              as JinjaFunction)
+          .handler(args, kwargs),
+  'capitalize': (args, kwargs) =>
+      (_resolveStringMember(
+                args.isNotEmpty && args[0] is JinjaStringValue
+                    ? args[0] as JinjaStringValue
+                    : JinjaStringValue.fromString(
+                        args.isNotEmpty ? args[0].toString() : '',
+                      ),
+                'capitalize',
+              )
+              as JinjaFunction)
+          .handler(args, kwargs),
+  'truncate': _truncate,
+  'wordcount': _wordcount,
+  'list': _list,
+  'yesno': _yesno,
   'replace': _replaceFilter,
+  'strftime_now': _strftime_now,
 };
+
+final Map<String, JinjaFunctionHandler> globalTests = {
+  'defined': _testIsDefined,
+  'undefined': _testIsUndefined,
+  'none': _testIsNone,
+  'number': _testIsNumeric,
+  'numeric': _testIsNumeric,
+  'string': _testIsString,
+  'mapping': _testIsMapping,
+  'iterable': _testIsIterable,
+  'sequence': _testIsSequence,
+  'in': _testIsIn,
+  'odd': _testIsOdd,
+  'even': _testIsEven,
+  'escaped': _testIsEscaped,
+  'filter': _testIsFilter,
+  'test': _testIsTest,
+  'divisibleby': _testIsDivisibleBy,
+  'lower': _testIsLower,
+  'upper': _testIsUpper,
+  'sameas': _testIsSameAs,
+  'callable': _testIsCallable,
+  'true': _testIsTrue,
+  'false': _testIsFalse,
+  'boolean': _testIsBoolean,
+  'integer': _testIsInteger,
+  'float': _testIsFloat,
+  'startingwith': _testIsStartingWith,
+  'endingwith': _testIsEndingWith,
+  'equalto': _testIsEqualTo,
+  'eq': _testIsEqualTo,
+  'ieq': _testIsIequalTo,
+  'ne': _testIsNotEqualTo,
+  'greaterthan': _testIsGreaterThan,
+  'gt': _testIsGreaterThan,
+  'ge': _testIsGreaterThanOrEqual,
+  'lessthan': _testIsLessThan,
+  'lt': _testIsLessThan,
+  'le': _testIsLessThanOrEqual,
+};
+
+// For backward compatibility or internal resolution where distinction doesn't matter
+final Map<String, JinjaFunctionHandler> globalBuiltins = {
+  ...globalFunctions,
+  ...globalFilters,
+  ...globalTests.map((k, v) => MapEntry('test_is_$k', v)),
+};
+
+/// Resolves an attribute on a value (e.g., user.name or list.length).
+/// This handles both properties (like length) and dictionary key access.
+JinjaValue _resolveAttribute(JinjaValue item, String attribute) {
+  if (attribute.isEmpty) return item;
+
+  if (attribute.contains('.')) {
+    final parts = attribute.split('.');
+    var current = item;
+    for (final part in parts) {
+      current = _resolveAttribute(current, part);
+      if (current.isUndefined) break;
+    }
+    return current;
+  }
+
+  // 1. Check for specialized properties (length, etc)
+  if (attribute == 'length') {
+    if (item is JinjaList) return JinjaInteger(item.items.length);
+    if (item is JinjaTuple) return JinjaInteger(item.items.length);
+    if (item is JinjaMap) return JinjaInteger(item.asJinjaMap.length);
+    if (item is JinjaStringValue) {
+      return JinjaInteger(item.value.toString().length);
+    }
+    // Note: Range would be a JinjaList here if returned by range()
+  }
+
+  // 2. Try Dot-style resolution (methods then keys)
+  if (item is JinjaMap) {
+    // Methods FIRST
+    final method = resolveMember(item, attribute);
+    if (method != null) return method;
+
+    // Keys SECOND
+    final key = JinjaStringValue.fromString(attribute);
+    if (item.asJinjaMap.containsKey(key)) {
+      return item.asJinjaMap[key]!;
+    }
+  } else {
+    // Normal objects: methods
+    final method = resolveMember(item, attribute);
+    if (method != null) return method;
+  }
+
+  // 3. Sequential index lookup (for map('0'))
+  final index = int.tryParse(attribute);
+  if (index != null) {
+    if (item is JinjaList) {
+      int idx = index < 0 ? item.items.length + index : index;
+      if (idx >= 0 && idx < item.items.length) return item.items[idx];
+    }
+    if (item is JinjaTuple) {
+      int idx = index < 0 ? item.items.length + index : index;
+      if (idx >= 0 && idx < item.items.length) return item.items[idx];
+    }
+  }
+
+  return const JinjaUndefined();
+}
 
 /// Resolves a member method on a value (e.g., list.append).
 /// Returns a bound function (closure) or null if not found.
@@ -92,6 +203,11 @@ JinjaValue? resolveMember(JinjaValue obj, String name) {
   if (obj is JinjaStringValue) return _resolveStringMember(obj, name);
   if (obj is JinjaNone) return _resolveNoneMember(obj, name);
   if (obj is JinjaUndefined) return _resolveUndefinedMember(obj, name);
+
+  // Finally check for custom attributes (e.g. LoopContext, or other objects)
+  final attr = obj.getAttribute(name);
+  if (attr != null) return attr;
+
   return null;
 }
 
@@ -146,15 +262,82 @@ JinjaValue _range(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 }
 
 JinjaValue _tojson(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
-  if (args.isEmpty) throw Exception('tojson expects at least 1 argument');
-  final val = args[0];
+  if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
+  final v = args[0];
   final indent = kwargs['indent']?.asInt;
+  final sortKeys = kwargs['sort_keys']?.asBool ?? false;
+  final ensureAscii = kwargs['ensure_ascii']?.asBool ?? true;
+
+  Object? data = v.toDart();
+  if (sortKeys) {
+    data = _sortJsonData(data);
+  }
+
+  String itemSep = indent == null ? ',' : ', ';
+  String keySep = indent == null ? ':' : ': ';
+
+  final separatorsArg = kwargs['separators'];
+  if (separatorsArg is JinjaList || separatorsArg is JinjaTuple) {
+    final items = separatorsArg is JinjaList
+        ? separatorsArg.items
+        : (separatorsArg as JinjaTuple).items;
+    if (items.length >= 2) {
+      itemSep = items[0].toString();
+      keySep = items[1].toString();
+    }
+  }
+
   final encoder = indent != null
       ? JsonEncoder.withIndent(' ' * indent)
       : const JsonEncoder();
+
+  String result = encoder.convert(data);
+
+  if (indent != null) {
+    if (itemSep != ', ' || keySep != ': ') {
+      result = result.replaceAll(', ', itemSep).replaceAll(': ', keySep);
+    }
+  } else {
+    if (itemSep != ',' || keySep != ':') {
+      result = result.replaceAll(',', itemSep).replaceAll(':', keySep);
+    }
+  }
+
+  if (ensureAscii) {
+    result = _ensureAscii(result);
+  }
+
   return JinjaStringValue(
-    JinjaString.from(encoder.convert(val.toDart()), isSafe: true),
+    JinjaString([JinjaStringPart(result, false)], isSafe: true),
   );
+}
+
+String _ensureAscii(String s) {
+  var res = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    var char = s[i];
+    var code = char.codeUnitAt(0);
+    if (code > 127) {
+      res.write('\\u${code.toRadixString(16).padLeft(4, '0')}');
+    } else {
+      res.write(char);
+    }
+  }
+  return res.toString();
+}
+
+Object? _sortJsonData(Object? data) {
+  if (data is Map) {
+    final sortedKeys = data.keys.toList()..sort();
+    final result = <String, dynamic>{};
+    for (final key in sortedKeys) {
+      result[key.toString()] = _sortJsonData(data[key]);
+    }
+    return result;
+  } else if (data is List) {
+    return data.map((e) => _sortJsonData(e)).toList();
+  }
+  return data;
 }
 
 JinjaValue _slice(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -162,7 +345,15 @@ JinjaValue _slice(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 }
 
 JinjaValue _dict(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
-  return JinjaMap(kwargs);
+  return JinjaMap(
+    kwargs.map(
+      (k, v) => MapEntry(
+        (k is JinjaValue ? k : JinjaStringValue.fromString(k.toString()))
+            as JinjaValue,
+        (v),
+      ),
+    ),
+  );
 }
 
 JinjaValue _list(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -182,19 +373,26 @@ JinjaValue _list(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (arg is JinjaMap) {
     // list(dict) -> keys
     return JinjaList(
-      arg.items.keys.map((k) => JinjaStringValue.fromString(k)).toList(),
+      arg.asJinjaMap.keys
+          .map(
+            (k) => k is JinjaStringValue
+                ? k
+                : JinjaStringValue.fromString(k.toString()),
+          )
+          .toList(),
     );
   }
-  return JinjaList([
-    arg,
-  ]); // Wrap others? Or error? Standard Jinja tries to iterate.
+  return JinjaList([arg]);
 }
 
 JinjaValue _int(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaInteger(0);
   final v = args[0];
+  final base = kwargs['base']?.asInt ?? (args.length > 2 ? args[2].asInt : 10);
   try {
-    if (v is JinjaStringValue) return JinjaInteger(int.parse(v.toString()));
+    if (v is JinjaStringValue) {
+      return JinjaInteger(int.parse(v.toString(), radix: base));
+    }
     if (v is JinjaFloat) return JinjaInteger(v.value.toInt());
     if (v is JinjaBoolean) return JinjaInteger(v.value ? 1 : 0);
     if (v is JinjaInteger) return v;
@@ -227,7 +425,7 @@ JinjaValue _len(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaInteger(0);
   final v = args[0];
   if (v is JinjaList) return JinjaInteger(v.items.length);
-  if (v is JinjaMap) return JinjaInteger(v.items.length);
+  if (v is JinjaMap) return JinjaInteger(v.asJinjaMap.length);
   if (v is JinjaStringValue) return JinjaInteger(v.value.length);
   if (v is JinjaTuple) return JinjaInteger(v.items.length);
   return const JinjaInteger(0);
@@ -323,24 +521,29 @@ int _compare(JinjaValue a, JinjaValue b) {
 JinjaValue _sum(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaInteger(0);
   final collection = args[0];
-  final attribute = kwargs['attribute']?.toString();
-  double startValue = kwargs['start']?.asDouble ?? 0.0;
-
-  double total = startValue;
-  bool isFloat = kwargs['start'] is JinjaFloat;
+  final attribute =
+      kwargs['attribute']?.toString() ??
+      (args.length > 1 ? args[1].toString() : null);
+  final startVal =
+      kwargs['start'] ?? (args.length > 2 ? args[2] : const JinjaInteger(0));
+  double total = startVal.asDouble;
+  bool isFloat = startVal is JinjaFloat;
 
   if (collection is JinjaList || collection is JinjaTuple) {
     final items = collection is JinjaList
         ? collection.asList
-        : collection.asList;
+        : (collection as JinjaTuple).asList;
+    // print('DEBUG: Summing collection of length ${items.length}, attribute=$attribute');
     for (final item in items) {
       final val = attribute != null ? _resolveAttribute(item, attribute) : item;
+      // print('DEBUG: Sum item val: $val (isNumeric: ${val.isNumeric})');
       if (val.isNumeric) {
         total += val.asDouble;
         if (val is JinjaFloat) isFloat = true;
       }
     }
   }
+  // print('DEBUG: Sum total: $total');
   return isFloat ? JinjaFloat(total) : JinjaInteger(total.toInt());
 }
 
@@ -393,6 +596,7 @@ JinjaValue _default(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _sort(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isUndefined || collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final reverse =
@@ -468,22 +672,37 @@ JinjaValue _reverse(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _map(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
-  if (collection is! JinjaList && collection is! JinjaTuple) return collection;
+  if (collection.isUndefined || collection.isNone) return const JinjaList([]);
 
-  final items = collection is JinjaList
-      ? (collection).items
-      : (collection as JinjaTuple).items;
+  final items = collection.asList;
+  final firstArg = args.length > 1 ? args[1].toString() : null;
 
-  final attribute =
+  // map(attribute='...') or map('attribute')
+  final String? attribute =
       kwargs['attribute']?.toString() ??
-      (args.length > 1 ? args[1].toString() : null);
-  final defaultVal = kwargs['default'] ?? (args.length > 2 ? args[2] : null);
+      (firstArg != null && !globalFilters.containsKey(firstArg)
+          ? firstArg
+          : null);
 
-  if (attribute == null || attribute.isEmpty) return collection;
+  // map(filter='...') or map('filter')
+  final String? filterName =
+      (firstArg != null && globalFilters.containsKey(firstArg))
+      ? firstArg
+      : null;
+
+  final defaultVal = kwargs['default'] ?? (args.length > 2 ? args[2] : null);
 
   final result = <JinjaValue>[];
   for (final item in items) {
-    var val = _resolveAttribute(item, attribute);
+    JinjaValue val;
+    if (filterName != null) {
+      val = globalFilters[filterName]!([item], {});
+    } else if (attribute != null) {
+      val = _resolveAttribute(item, attribute);
+    } else {
+      val = item;
+    }
+
     if (val.isUndefined && defaultVal != null) {
       val = defaultVal;
     }
@@ -498,32 +717,28 @@ JinjaValue _selectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
-      ? (collection).items
+      ? collection.items
       : (collection as JinjaTuple).items;
   final attribute = args.length > 1 ? args[1].toString() : null;
   final testName = args.length > 2 ? args[2].toString() : null;
-  final testVal = args.length > 3 ? args[3] : null;
+  final testArgs = args.length > 3 ? args.sublist(3) : <JinjaValue>[];
+  final testKwargs = kwargs;
+
+  final testFunc = testName != null ? globalTests[testName] : null;
+  if (testName != null && testFunc == null) {
+    throw Exception('Unknown test: $testName');
+  }
 
   final result = <JinjaValue>[];
   for (final item in items) {
-    JinjaValue target = item;
-    if (attribute != null && attribute.isNotEmpty) {
-      target = _resolveAttribute(item, attribute);
-    }
-
-    bool matched = false;
-    if (testName == null) {
-      matched = target.asBool;
+    final val = attribute != null ? _resolveAttribute(item, attribute) : item;
+    bool match;
+    if (testFunc != null) {
+      match = testFunc([val, ...testArgs], testKwargs).asBool;
     } else {
-      final testFunc = globalBuiltins['test_is_$testName'];
-      if (testFunc != null) {
-        final testArgs = [target];
-        if (testVal != null) testArgs.add(testVal);
-        matched = testFunc(testArgs, {}).asBool;
-      }
+      match = val.asBool;
     }
-
-    if (matched) result.add(item);
+    if (match) result.add(item);
   }
   return JinjaList(result);
 }
@@ -534,32 +749,88 @@ JinjaValue _rejectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
-      ? (collection).items
+      ? collection.items
       : (collection as JinjaTuple).items;
   final attribute = args.length > 1 ? args[1].toString() : null;
   final testName = args.length > 2 ? args[2].toString() : null;
-  final testVal = args.length > 3 ? args[3] : null;
+  final testArgs = args.length > 3 ? args.sublist(3) : <JinjaValue>[];
+  final testKwargs = kwargs;
+
+  final testFunc = testName != null ? globalTests[testName] : null;
+  if (testName != null && testFunc == null) {
+    throw Exception('Unknown test: $testName');
+  }
 
   final result = <JinjaValue>[];
   for (final item in items) {
-    JinjaValue target = item;
-    if (attribute != null && attribute.isNotEmpty) {
-      target = _resolveAttribute(item, attribute);
-    }
-
-    bool matched = false;
-    if (testName == null) {
-      matched = target.asBool;
+    final val = attribute != null ? _resolveAttribute(item, attribute) : item;
+    bool match;
+    if (testFunc != null) {
+      match = testFunc([val, ...testArgs], testKwargs).asBool;
     } else {
-      final testFunc = globalBuiltins['test_is_$testName'];
-      if (testFunc != null) {
-        final testArgs = [target];
-        if (testVal != null) testArgs.add(testVal);
-        matched = testFunc(testArgs, {}).asBool;
-      }
+      match = val.asBool;
     }
+    if (!match) result.add(item);
+  }
+  return JinjaList(result);
+}
 
-    if (!matched) result.add(item);
+JinjaValue _select(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaList([]);
+  final collection = args[0];
+  if (collection is! JinjaList && collection is! JinjaTuple) return collection;
+
+  final items = collection is JinjaList
+      ? collection.items
+      : (collection as JinjaTuple).items;
+  final testName = args.length > 1 ? args[1].toString() : null;
+  final testArgs = args.length > 2 ? args.sublist(2) : <JinjaValue>[];
+  final testKwargs = kwargs;
+
+  final testFunc = testName != null ? globalTests[testName] : null;
+  if (testName != null && testFunc == null) {
+    throw Exception('Unknown test: $testName');
+  }
+
+  final result = <JinjaValue>[];
+  for (final item in items) {
+    bool match;
+    if (testFunc != null) {
+      match = testFunc([item, ...testArgs], testKwargs).asBool;
+    } else {
+      match = item.asBool;
+    }
+    if (match) result.add(item);
+  }
+  return JinjaList(result);
+}
+
+JinjaValue _reject(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaList([]);
+  final collection = args[0];
+  if (collection is! JinjaList && collection is! JinjaTuple) return collection;
+
+  final items = collection is JinjaList
+      ? collection.items
+      : (collection as JinjaTuple).items;
+  final testName = args.length > 1 ? args[1].toString() : null;
+  final testArgs = args.length > 2 ? args.sublist(2) : <JinjaValue>[];
+  final testKwargs = kwargs;
+
+  final testFunc = testName != null ? globalTests[testName] : null;
+  if (testName != null && testFunc == null) {
+    throw Exception('Unknown test: $testName');
+  }
+
+  final result = <JinjaValue>[];
+  for (final item in items) {
+    bool match;
+    if (testFunc != null) {
+      match = testFunc([item, ...testArgs], testKwargs).asBool;
+    } else {
+      match = item.asBool;
+    }
+    if (!match) result.add(item);
   }
   return JinjaList(result);
 }
@@ -569,7 +840,10 @@ JinjaValue _attr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final obj = args[0];
   final name = args.length > 1 ? args[1].toString() : '';
 
-  if (obj is JinjaMap) return obj.items[name] ?? const JinjaUndefined();
+  if (obj is JinjaMap) {
+    return obj.asJinjaMap[JinjaStringValue.fromString(name)] ??
+        const JinjaUndefined();
+  }
   return const JinjaUndefined();
 }
 
@@ -616,8 +890,15 @@ JinjaValue _items(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final v = args[0];
   if (v is JinjaMap) {
     return JinjaList(
-      v.items.entries
-          .map((e) => JinjaTuple([JinjaStringValue.fromString(e.key), e.value]))
+      v.asJinjaMap.entries
+          .map(
+            (e) => JinjaTuple([
+              e.key is JinjaStringValue
+                  ? e.key
+                  : JinjaStringValue.fromString(e.key.toString()),
+              e.value,
+            ]),
+          )
           .toList(),
     );
   }
@@ -629,7 +910,13 @@ JinjaValue _keys(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final v = args[0];
   if (v is JinjaMap) {
     return JinjaList(
-      v.items.keys.map((k) => JinjaStringValue.fromString(k)).toList(),
+      v.asJinjaMap.keys
+          .map(
+            (k) => k is JinjaStringValue
+                ? k
+                : JinjaStringValue.fromString(k.toString()),
+          )
+          .toList(),
     );
   }
   return const JinjaList([]);
@@ -638,7 +925,7 @@ JinjaValue _keys(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _values(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final v = args[0];
-  if (v is JinjaMap) return JinjaList(v.items.values.toList());
+  if (v is JinjaMap) return JinjaList(v.asJinjaMap.values.toList());
   return const JinjaList([]);
 }
 
@@ -694,7 +981,7 @@ JinjaValue _testIsString(
   return JinjaBoolean(args[0].isString);
 }
 
-JinjaValue _testIsNumber(
+JinjaValue _testIsNumeric(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
@@ -708,7 +995,13 @@ JinjaValue _testIsIterable(
 ) {
   if (args.isEmpty) return const JinjaBoolean(false);
   final v = args[0];
-  return JinjaBoolean(v.isList || v.isMap || v.isString);
+  return JinjaBoolean(
+    v is JinjaList ||
+        v is JinjaTuple ||
+        v is JinjaMap ||
+        v is JinjaStringValue ||
+        v is JinjaUndefined,
+  ); // llama.cpp considers undefined iterable
 }
 
 JinjaValue _testIsSequence(
@@ -717,7 +1010,12 @@ JinjaValue _testIsSequence(
 ) {
   if (args.isEmpty) return const JinjaBoolean(false);
   final v = args[0];
-  return JinjaBoolean(v.isList || v.isString);
+  return JinjaBoolean(
+    v is JinjaList ||
+        v is JinjaTuple ||
+        v is JinjaStringValue ||
+        v is JinjaUndefined,
+  ); // llama.cpp considers undefined sequence
 }
 
 JinjaValue _testIsMapping(
@@ -831,7 +1129,7 @@ JinjaValue _testIsIn(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
     return const JinjaBoolean(false);
   }
   if (collection is JinjaMap) {
-    return JinjaBoolean(collection.items.containsKey(item.toString()));
+    return JinjaBoolean(collection.asJinjaMap.containsKey(item));
   }
   if (collection is JinjaStringValue) {
     return JinjaBoolean(collection.value.toString().contains(item.toString()));
@@ -849,10 +1147,28 @@ JinjaValue _testIsOdd(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 
 JinjaValue _testIsEven(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaBoolean(false);
-  final v = args[0];
-  if (v is JinjaInteger) return JinjaBoolean(v.value.isEven);
-  if (v.isNumeric) return JinjaBoolean(v.asInt.isEven);
-  return const JinjaBoolean(false);
+  return JinjaBoolean(args[0].asInt % 2 == 0);
+}
+
+JinjaValue _testIsEscaped(
+  List<JinjaValue> args,
+  Map<String, JinjaValue> kwargs,
+) {
+  if (args.isEmpty) return const JinjaBoolean(false);
+  return JinjaBoolean(args[0].isSafe);
+}
+
+JinjaValue _testIsFilter(
+  List<JinjaValue> args,
+  Map<String, JinjaValue> kwargs,
+) {
+  if (args.isEmpty) return const JinjaBoolean(false);
+  return JinjaBoolean(globalFilters.containsKey(args[0].toString()));
+}
+
+JinjaValue _testIsTest(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaBoolean(false);
+  return JinjaBoolean(globalTests.containsKey(args[0].toString()));
 }
 
 // Member resolution
@@ -941,7 +1257,13 @@ JinjaValue? _resolveMapMember(JinjaMap obj, String name) {
     case 'keys':
       return JinjaFunction('keys', (args, kwargs) {
         return JinjaList(
-          obj.items.keys.map((k) => JinjaStringValue.fromString(k)).toList(),
+          obj.asJinjaMap.keys
+              .map(
+                (k) => k is JinjaStringValue
+                    ? k
+                    : JinjaStringValue.fromString(k.toString()),
+              )
+              .toList(),
         );
       });
     case 'values':
@@ -953,8 +1275,12 @@ JinjaValue? _resolveMapMember(JinjaMap obj, String name) {
         return JinjaList(
           obj.items.entries
               .map(
-                (e) =>
-                    JinjaTuple([JinjaStringValue.fromString(e.key), e.value]),
+                (e) => JinjaTuple([
+                  e.key is JinjaStringValue
+                      ? e.key
+                      : JinjaStringValue.fromString(e.key.toString()),
+                  e.value,
+                ]),
               )
               .toList(),
         );
@@ -962,7 +1288,7 @@ JinjaValue? _resolveMapMember(JinjaMap obj, String name) {
     case 'get':
       return JinjaFunction('get', (args, kwargs) {
         if (args.isEmpty) throw Exception('get expects key');
-        final key = args[0].toString();
+        final key = args[0];
         final defaultVal = args.length > 1 ? args[1] : const JinjaNone();
         return obj.items[key] ?? defaultVal;
       });
@@ -1016,13 +1342,93 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
       });
     case 'split':
       return JinjaFunction('split', (args, kwargs) {
-        final delimiter = args.isNotEmpty ? args[0].toString() : ' ';
-        // Python split behavior is subtle with empty delimiter or None?
-        // Jinja split(d, limit).
-        // For now simple split.
-        final parts = obj.value.toString().split(delimiter);
+        final delimiter = args.isNotEmpty ? args[0].toString() : null;
+        final maxsplit =
+            kwargs['maxsplit']?.asInt ?? (args.length > 1 ? args[1].asInt : -1);
+
+        String s = obj.value.toString();
+        List<String> parts;
+        if (delimiter == null || delimiter == ' ') {
+          // split by whitespace
+          parts = s.trim().split(RegExp(r'\s+'));
+          if (maxsplit >= 0 && parts.length > maxsplit + 1) {
+            final rest = parts.sublist(maxsplit).join(' ');
+            parts = parts.sublist(0, maxsplit)..add(rest);
+          }
+        } else {
+          if (maxsplit >= 0) {
+            // Dart split doesn't have maxsplit, need careful implementation
+            parts = [];
+            int start = 0;
+            for (int i = 0; i < maxsplit; i++) {
+              int idx = s.indexOf(delimiter, start);
+              if (idx == -1) break;
+              parts.add(s.substring(start, idx));
+              start = idx + delimiter.length;
+            }
+            parts.add(s.substring(start));
+          } else {
+            parts = s.split(delimiter);
+          }
+        }
+
         return JinjaList(
           parts.map((s) => JinjaStringValue.fromString(s)).toList(),
+        );
+      });
+    case 'rsplit':
+      return JinjaFunction('rsplit', (args, kwargs) {
+        final delimiter = args.isNotEmpty ? args[0].toString() : null;
+        final maxsplit =
+            kwargs['maxsplit']?.asInt ?? (args.length > 1 ? args[1].asInt : -1);
+
+        String s = obj.value.toString();
+        List<String> parts;
+        if (delimiter == null || delimiter == ' ') {
+          // rsplit by whitespace
+          parts = s.trim().split(RegExp(r'\s+'));
+          if (maxsplit >= 0 && parts.length > maxsplit + 1) {
+            final rest = parts.sublist(0, parts.length - maxsplit).join(' ');
+            parts = [rest, ...parts.sublist(parts.length - maxsplit)];
+          }
+        } else {
+          if (maxsplit >= 0) {
+            parts = [];
+            int end = s.length;
+            for (int i = 0; i < maxsplit; i++) {
+              int idx = s.lastIndexOf(delimiter, end - 1);
+              if (idx == -1) break;
+              parts.insert(0, s.substring(idx + delimiter.length, end));
+              end = idx;
+            }
+            parts.insert(0, s.substring(0, end));
+          } else {
+            parts = s.split(delimiter);
+          }
+        }
+        return JinjaList(
+          parts.map((ps) => JinjaStringValue.fromString(ps)).toList(),
+        );
+      });
+    case 'capitalize':
+      return JinjaFunction('capitalize', (args, kwargs) {
+        final s = obj.value.toString();
+        if (s.isEmpty) return obj;
+        return JinjaStringValue.fromString(
+          s[0].toUpperCase() + s.substring(1).toLowerCase(),
+        );
+      });
+    case 'title':
+      return JinjaFunction('title', (args, kwargs) {
+        final s = obj.value.toString();
+        return JinjaStringValue.fromString(
+          s
+              .split(' ')
+              .map((w) {
+                if (w.isEmpty) return w;
+                return w[0].toUpperCase() + w.substring(1).toLowerCase();
+              })
+              .join(' '),
         );
       });
     case 'replace':
@@ -1030,9 +1436,29 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
         if (args.length < 2) return obj;
         final oldVal = args[0].toString();
         final newVal = args[1].toString();
+        final count =
+            kwargs['count']?.asInt ?? (args.length > 2 ? args[2].asInt : -1);
+
+        String s = obj.value.toString();
+        if (count >= 0) {
+          String res = s;
+          int total = 0;
+          int start = 0;
+          while (total < count) {
+            int idx = res.indexOf(oldVal, start);
+            if (idx == -1) break;
+            res = res.replaceRange(idx, idx + oldVal.length, newVal);
+            start = idx + newVal.length;
+            total++;
+          }
+          return JinjaStringValue(
+            JinjaString.from(res, isSafe: obj.value.isSafe),
+          );
+        }
+
         return JinjaStringValue(
           JinjaString.from(
-            obj.value.toString().replaceAll(oldVal, newVal),
+            s.replaceAll(oldVal, newVal),
             isSafe: obj.value.isSafe,
           ),
         );
@@ -1132,14 +1558,16 @@ JinjaValue? _resolveUndefinedMember(JinjaUndefined obj, String name) {
 }
 
 JinjaValue _namespace(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
-  final Map<String, JinjaValue> items = {};
+  JinjaValue val(dynamic v) =>
+      v is JinjaValue ? v : JinjaStringValue.fromString(v.toString());
+  final Map<JinjaValue, JinjaValue> items = {};
   if (args.isNotEmpty) {
     final arg = args[0];
     if (arg is JinjaMap) {
-      items.addAll(arg.asMap);
+      items.addAll(arg.asJinjaMap);
     }
   }
-  items.addAll(kwargs);
+  items.addAll(kwargs.map((k, v) => MapEntry(val(k), val(v))));
   return JinjaMap(items);
 }
 
@@ -1166,28 +1594,40 @@ JinjaValue _dictsort(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
       kwargs['reverse']?.asBool ?? (args.length > 3 ? args[3].asBool : false);
 
   final entries = v.items.entries.toList();
+  final byValue = by == 'value';
   entries.sort((a, b) {
     dynamic valA, valB;
-    if (by == 'value') {
+    int cmp;
+    if (byValue) {
       valA = a.value.toString();
       valB = b.value.toString();
     } else {
-      valA = a.key;
-      valB = b.key;
+      valA = a.key.toString();
+      valB = b.key.toString();
     }
 
-    if (!caseSensitive && valA is String && valB is String) {
-      valA = valA.toLowerCase();
-      valB = valB.toLowerCase();
+    if (!caseSensitive) {
+      cmp = valA.toString().toLowerCase().compareTo(
+        valB.toString().toLowerCase(),
+      );
+      if (cmp == 0) cmp = valA.toString().compareTo(valB.toString());
+    } else {
+      // Case-sensitive in Jinja2/Python: 'A' < 'a'
+      cmp = valA.toString().compareTo(valB.toString());
     }
-
-    final c = valA.compareTo(valB);
-    return reverse ? -c : c;
+    return reverse ? -cmp : cmp;
   });
 
   return JinjaList(
     entries
-        .map((e) => JinjaTuple([JinjaStringValue.fromString(e.key), e.value]))
+        .map(
+          (e) => JinjaTuple([
+            e.key is JinjaStringValue
+                ? e.key
+                : JinjaStringValue.fromString(e.key.toString()),
+            e.value,
+          ]),
+        )
         .toList(),
   );
 }
@@ -1269,39 +1709,92 @@ JinjaValue _strftime_now(
 
 JinjaValue _testIsTrue(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaBoolean(false);
-  return JinjaBoolean(args[0].asBool);
+  final v = args[0];
+  return JinjaBoolean(v is JinjaBoolean && v.value == true);
 }
 
 JinjaValue _testIsFalse(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaBoolean(false);
-  return JinjaBoolean(!args[0].asBool);
+  final v = args[0];
+  return JinjaBoolean(v is JinjaBoolean && v.value == false);
 }
 
-JinjaValue _resolveAttribute(JinjaValue item, String attribute) {
-  if (attribute.isEmpty) return item;
-  if (item is JinjaMap) {
-    return item.items[attribute] ?? const JinjaUndefined();
-  }
+JinjaValue _truncate(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
+  final s = args[0].toString();
+  final length =
+      kwargs['length']?.asInt ?? (args.length > 1 ? args[1].asInt : 255);
+  final killwords =
+      kwargs['killwords']?.asBool ?? (args.length > 2 ? args[2].asBool : false);
+  final end =
+      kwargs['end']?.toString() ??
+      (args.length > 3 ? args[3].toString() : '...');
 
-  // Handle numeric index access for lists and tuples (e.g., map(attribute='0'))
-  final index = int.tryParse(attribute);
-  if (index != null) {
-    if (item is JinjaList && index >= 0 && index < item.items.length) {
-      return item.items[index];
-    }
-    if (item is JinjaTuple && index >= 0 && index < item.items.length) {
-      return item.items[index];
-    }
-  }
+  if (s.length <= length) return args[0];
 
-  if (item is JinjaStringValue && attribute == 'length') {
-    return JinjaInteger(item.value.length);
+  String res;
+  if (killwords) {
+    res = s.substring(0, length - end.length);
+  } else {
+    // find last whitespace before length
+    int lastSpace = s.lastIndexOf(' ', length - end.length);
+    if (lastSpace == -1) {
+      res = s.substring(0, length - end.length);
+    } else {
+      res = s.substring(0, lastSpace);
+    }
   }
-  if (item is JinjaList && attribute == 'length') {
-    return JinjaInteger(item.items.length);
-  }
-  if (item is JinjaTuple && attribute == 'length') {
-    return JinjaInteger(item.items.length);
-  }
-  return const JinjaUndefined();
+  return JinjaStringValue.fromString(res + end);
 }
+
+JinjaValue _wordcount(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaInteger(0);
+  final s = args[0].toString().trim();
+  if (s.isEmpty) return const JinjaInteger(0);
+  return JinjaInteger(s.split(RegExp(r'\s+')).length);
+}
+
+JinjaValue _yesno(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
+  return JinjaStringValue.fromString(args[0].asBool ? 'yes' : 'no');
+}
+
+JinjaValue _testIsDivisibleBy(
+  List<JinjaValue> args,
+  Map<String, JinjaValue> kwargs,
+) {
+  if (args.length < 2) return const JinjaBoolean(false);
+  final n = args[1].asInt;
+  if (n == 0) return const JinjaBoolean(false);
+  return JinjaBoolean(args[0].asInt % n == 0);
+}
+
+JinjaValue _testIsLower(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaBoolean(false);
+  final s = args[0].toString();
+  return JinjaBoolean(s == s.toLowerCase() && s != s.toUpperCase());
+}
+
+JinjaValue _testIsUpper(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
+  if (args.isEmpty) return const JinjaBoolean(false);
+  final s = args[0].toString();
+  return JinjaBoolean(s == s.toUpperCase() && s != s.toLowerCase());
+}
+
+JinjaValue _testIsSameAs(
+  List<JinjaValue> args,
+  Map<String, JinjaValue> kwargs,
+) {
+  if (args.length < 2) return const JinjaBoolean(false);
+  return JinjaBoolean(identical(args[0], args[1]) || args[0] == args[1]);
+}
+
+JinjaValue _testIsCallable(
+  List<JinjaValue> args,
+  Map<String, JinjaValue> kwargs,
+) {
+  if (args.isEmpty) return const JinjaBoolean(false);
+  return JinjaBoolean(args[0].isCallable);
+}
+
+// End of builtins.dart

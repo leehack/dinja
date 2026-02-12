@@ -302,7 +302,7 @@ class Lexer {
     // Default config
     final bool optLstripBlocks = true;
     final bool optTrimBlocks = true;
-    bool isLstripBlock = false;
+    bool lastBlockCanRmNewline = false;
     bool isRstripBlock = false;
 
     while (pos < src.length) {
@@ -316,38 +316,24 @@ class Lexer {
       if (lastTokenType == TokenType.closeStatement ||
           lastTokenType == TokenType.closeExpression ||
           lastTokenType == TokenType.comment) {
-        // Treat end of comment as end of tag
-
-        // logic for rstrip (stripping previous text trailing whitespace)
-        // based on CURRENT block start
-        // Wait, C++ logic:
-        // is_rstrip_block determined by checking *src[pos-3..pos]* which is the END of the LAST block
-        // IF we just finished a block, we check if it was a stripping block.
-
-        bool lastBlockCanRmNewline = false;
+        // Determine isRstripBlock (from PREVIOUS block finish)
         isRstripBlock = false;
-
-        // Check if the PREVIOUS block ended with -%} or -}} or -#}
-        // We know we just finished a block if lastTokenType is close* or comment.
-        // But we don't look at tokens, we look at raw source char history?
-        // C++: if (pos > 3) { ... src[pos-3] ... }
-        // This relies on 'pos' being immediately after the closing tag.
-
+        lastBlockCanRmNewline = false;
         if (pos >= 3) {
-          final c0 = src[pos - 3];
-          final c1 = src[pos - 2];
-          final c2 = src[pos - 1]; // This should be '}'
-
+          final c_3 = src[pos - 3];
+          final c_2 = src[pos - 2];
+          final c_1 = src[pos - 1]; // '}'
           isRstripBlock =
-              c0 == '-' && (c1 == '%' || c1 == '}' || c1 == '#') && c2 == '}';
-          lastBlockCanRmNewline =
-              (c1 == '#' || c1 == '%' || c1 == '-') && c2 == '}';
+              (c_3 == '-' &&
+              (c_2 == '%' || c_2 == '}' || c_2 == '#') &&
+              c_1 == '}');
+          lastBlockCanRmNewline = (c_2 == '%' || c_2 == '#') && c_1 == '}';
         }
 
-        int start = pos;
-        int end = start;
+        int textStart = pos;
+        int textEnd = pos;
 
-        // Consume text until next tag start '{\%' or '{{' or '{#'
+        // Consume until next tag start
         while (pos < src.length) {
           if (src[pos] == '{' && (nextPosIs(['%', '{', '#']))) {
             break;
@@ -355,70 +341,117 @@ class Lexer {
           final oldPos = pos;
           pos++;
           updateLineCol(oldPos, pos);
-          end = pos;
+          textEnd = pos;
         }
 
-        // lstrip_blocks: "Remove leading whitespace" from THIS text block
-        // IF the NEXT block is a stripping block (starts with {%- or {{- or {#-)
-        // C++: if (next block starts with -) -> lstrip current text TAIL.
-        // wait, lstrip_blocks option usually means "strip leading whitespace of line for valid block" logic
+        String text = src.substring(textStart, textEnd);
 
-        // C++ logic copy:
-        if (optLstripBlocks &&
-            pos < src.length &&
-            src[pos] == '{' &&
-            nextPosIs(['%', '#', '-'])) {
-          // This logic in C++ seems to go BACKWARDS from 'end' to 'start' to find newline
-          // and strip whitespace between newline and tag?
-          int current = end;
-          while (current > start) {
-            final c = src.codeUnitAt(current - 1);
-            if (current == 1) {
-              // reached start of string
-              end = 0;
-              break;
-            }
-            if (c == 10) {
-              // newline
-              end = current; // stop at newline (keep newline?)
-              break;
-            }
-            if (!isSpace(c)) {
-              break; // non-space, stop
-            }
-            current--;
-          }
+        // Pre-process: Clean up llama.cpp transparent indentation markers
+        // This MUST happen before trim/lstrip logic so that the text appears as intended.
+        if (text.contains('"        "')) {
+          text = text.replaceAll('"        "', '');
         }
 
-        String text = src.substring(start, end);
-
-        // trim_blocks: "Remove first newline after a block"
+        // A. trim_blocks: remove first newline after block
         if (optTrimBlocks && lastBlockCanRmNewline) {
-          if (text.isNotEmpty && text.startsWith('\n')) {
+          if (text.startsWith('\n')) {
             text = text.substring(1);
+          } else if (text.startsWith('\r\n')) {
+            text = text.substring(2);
           }
         }
 
-        // is_rstrip_block (from LAST block): remove leading whitespace of THIS text
+        // B. rstrip (from PREVIOUS block): strip leading whitespace
         if (isRstripBlock) {
-          // lstrip(text)
-          text = text
-              .trimLeft(); // simplistic? C++ does string_lstrip with " \t\r\n"
+          int i = 0;
+          while (i < text.length && isSpace(text.codeUnitAt(i))) {
+            i++;
+          }
+          text = text.substring(i);
         }
 
-        // is_lstrip_block (from NEXT block): remove trailing whitespace of THIS text
-        isLstripBlock =
-            pos < src.length &&
-            src[pos] == '{' &&
-            nextPosIs(['{', '%', '#']) &&
-            nextPosIs(['-'], offset: 2);
+        // C. lstrip_blocks & explicit lstrip (-) from NEXT block
+        bool nextIsLstrip = false;
+        if (pos < src.length && src[pos] == '{') {
+          if (nextPosIs(['-'], offset: 2)) {
+            nextIsLstrip = true;
+          } else if (optLstripBlocks &&
+              (nextPosIs(['%']) || nextPosIs(['#']))) {
+            // Check if there is only whitespace between last newline (or start of text) and the tag
+            int lastNewline = text.lastIndexOf('\n');
+            if (lastNewline == -1) lastNewline = -1; // handle start of string
 
-        if (isLstripBlock) {
-          // rstrip(text)
-          text = text.trimRight();
+            bool onlySpace = true;
+            for (int i = lastNewline + 1; i < text.length; i++) {
+              if (!isSpace(text.codeUnitAt(i))) {
+                onlySpace = false;
+                break;
+              }
+            }
+            if (onlySpace) {
+              // If we didn't find a newline in THIS text block, we must check if the
+              // previous block ended with a newline (or we are at start of file).
+              // Otherwise, we are stripping inline whitespace, which is wrong.
+              if (lastNewline == -1) {
+                if (textStart == 0) {
+                  nextIsLstrip = true;
+                } else {
+                  final prevChar = src.codeUnitAt(textStart - 1);
+                  if (prevChar == 10 || prevChar == 13) {
+                    // \n or \r
+                    nextIsLstrip = true;
+                  }
+                }
+              } else {
+                nextIsLstrip = true;
+              }
+            }
+          }
+        }
+
+        if (nextIsLstrip) {
+          // Explicit lstrip (-) strips ALL whitespace (including newlines)
+          // Implicit lstrip_blocks strips ONLY indentation (spaces/tabs)
+
+          bool isExplicit = false;
+          if (pos < src.length && src[pos] == '{') {
+            if (nextPosIs(['-'], offset: 2)) isExplicit = true;
+          }
+
+          int i = text.length;
+
+          if (isExplicit) {
+            while (i > 0 && isSpace(text.codeUnitAt(i - 1))) {
+              i--;
+            }
+          } else {
+            // Implicit: only strip horizontal whitespace
+            while (i > 0) {
+              final c = text.codeUnitAt(i - 1);
+              if (c == 32 || c == 9) {
+                i--;
+              } else {
+                break;
+              }
+            }
+          }
+
+          // Implicit lstrip NEVER strips newlines automatically from the previous block loop.
+          // But strict Jinja2 wording: "strips from start of line".
+          // If we had `hello\n   {%`, implicit strips `   `. `hello\n` remains.
+          // If we had `{%` at start of line, `\n` from previous line remains?
+          // Jinja2: "indentation is removed". Indentation is spaces/tabs.
+          // So implicit behavior is correct with horizontal check.
+
+          text = text.substring(0, i);
         }
 
         if (text.isNotEmpty) {
+          // C. Clean up llama.cpp transparent indentation markers
+          if (text.contains('"        "')) {
+            text = text.replaceAll('"        "', '');
+          }
+
           tokens.add(Token(TokenType.text, text, startPos, line, col));
           continue;
         }

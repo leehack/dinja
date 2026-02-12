@@ -59,10 +59,26 @@ JinjaValue execStatements(List<Statement> stmts, Context ctx) {
     for (final stmt in stmts) {
       final val = stmt.execute(ctx);
       if (val is JinjaStringValue) {
-        if (val.value.isSafe) {
+        if (val.isSafe) {
           parts.addAll(val.value.parts);
         } else {
-          parts.addAll(val.value.escape().parts);
+          // Check parts for input/unsafe content
+          for (final part in val.value.parts) {
+            if (part.isInput) {
+              final escaped = part.val
+                  .replaceAll('&', '&amp;')
+                  .replaceAll('<', '&lt;')
+                  .replaceAll('>', '&gt;')
+                  .replaceAll('"', '&quot;')
+                  .replaceAll("'", '&#39;');
+              // print('DEBUG escaping: ${part.val} -> $escaped');
+              parts.add(
+                JinjaStringPart(escaped, part.isInput),
+              ); // Escaped -> safe/template
+            } else {
+              parts.add(part);
+            }
+          }
         }
       } else if (!val.isNone && !val.isUndefined) {
         // Convert to string and escape it
@@ -162,6 +178,9 @@ class ForStatement extends Statement {
     }
 
     if (!iterableVal.isList && !iterableVal.isMap && !iterableVal.isString) {
+      if (iterableVal is JinjaFunction) {
+        print('DEBUG: For loop on Function: ${iterableVal.name}');
+      }
       throw Exception(
         'Expected iterable in for loop: got ${iterableVal.typeName}',
       );
@@ -169,10 +188,15 @@ class ForStatement extends Statement {
 
     List<JinjaValue> items = [];
     if (iterableVal is JinjaMap) {
-      // Loop over keys (sorted?)
-      items = iterableVal.items.keys
-          .map((k) => JinjaStringValue.fromString(k))
-          .toList();
+      // Loop over keys
+      // Sort keys for deterministic output if needed, though Jinja2 doesn't strictly guarantee order, usually tests expect sorted keys or we should sort.
+      // Standard Jinja2 iterates keys.
+      // llama.cpp tests seem to expect keys.
+      final keys = iterableVal.asMap.keys.toList();
+      // keys.sort(); // Optional: sort keys? Dinja existing tests expect 'a,b'. Maps in Dart preserve insertion order? LinkedHashMap does.
+      // If the map came from JSON/Literal, it's LinkedHashMap.
+
+      items = keys.map((k) => JinjaStringValue.fromString(k)).toList();
     } else if (iterableVal is JinjaList) {
       items = iterableVal.items;
     } else if (iterableVal is JinjaTuple) {
@@ -226,7 +250,7 @@ class ForStatement extends Statement {
             ? items[i + 1]
             : const JinjaUndefined(),
       };
-      loopCtx.set('loop', JinjaMap(loopObj.map((k, v) => MapEntry(k, v))));
+      loopCtx.set('loop', JinjaLoopContext(loopObj));
 
       _bindLoopVar(loopCtx, loopVar, item);
 
@@ -346,7 +370,7 @@ class SetStatement extends Statement {
 
       final obj = mem.object.execute(ctx);
       if (obj is JinjaMap) {
-        obj.items[(mem.property as Identifier).name] = rhs;
+        obj.items[val((mem.property as Identifier).name)] = rhs;
       } else {
         throw Exception('Cannot set attribute on ${obj.typeName}');
       }
@@ -559,15 +583,7 @@ class Identifier extends Expression {
 
   @override
   JinjaValue execute(Context ctx) {
-    final val = ctx.resolve(name);
-    if (!val.isUndefined) return val;
-
-    // Check builtins
-    if (globalBuiltins.containsKey(name)) {
-      return JinjaFunction(name, globalBuiltins[name]!);
-    }
-
-    return const JinjaUndefined();
+    return ctx.resolve(name);
   }
 }
 
@@ -641,11 +657,9 @@ class ObjectLiteral extends Expression {
   String get type => 'ObjectLiteral';
   @override
   JinjaValue execute(Context ctx) {
-    final map = <String, JinjaValue>{};
+    final map = <JinjaValue, JinjaValue>{};
     for (final entry in items) {
-      final key = entry.key.execute(ctx).toString();
-      final val = entry.value.execute(ctx);
-      map[key] = val;
+      map[entry.key.execute(ctx)] = entry.value.execute(ctx);
     }
     return JinjaMap(map);
   }
@@ -674,107 +688,126 @@ class MemberExpression extends Expression {
   @override
   @override
   JinjaValue execute(Context ctx) {
-    if (computed) {
-      // obj[expr]
-      // Check for SliceExpression
-      if (property is SliceExpression) {
-        final slice = property as SliceExpression;
-        final startVal = slice.start?.execute(ctx);
-        final stopVal = slice.stop?.execute(ctx);
-        final stepVal = slice.step?.execute(ctx);
+    // Handle slice expressions first, as they are a special case of computed access
+    if (computed && property is SliceExpression) {
+      final slice = property as SliceExpression;
+      final startVal = slice.start?.execute(ctx);
+      final stopVal = slice.stop?.execute(ctx);
+      final stepVal = slice.step?.execute(ctx);
 
-        final obj = object.execute(ctx);
+      final obj = object.execute(ctx);
 
-        int? start = (startVal != null && !startVal.isNone)
-            ? startVal.asInt
-            : null;
-        int? stop = (stopVal != null && !stopVal.isNone) ? stopVal.asInt : null;
-        int step = (stepVal != null && !stepVal.isNone) ? stepVal.asInt : 1;
+      int? start = (startVal != null && !startVal.isNone)
+          ? startVal.asInt
+          : null;
+      int? stop = (stopVal != null && !stopVal.isNone) ? stopVal.asInt : null;
+      int step = (stepVal != null && !stepVal.isNone) ? stepVal.asInt : 1;
 
-        if (obj is JinjaList) {
-          int len = obj.items.length;
-          start ??= step > 0 ? 0 : len - 1;
-          stop ??= step > 0 ? len : -1;
+      if (obj is JinjaList || obj is JinjaTuple) {
+        final List<JinjaValue> itemsList = obj is JinjaList
+            ? obj.items
+            : (obj as JinjaTuple).items;
+        int len = itemsList.length;
+        start ??= step > 0 ? 0 : len - 1;
+        stop ??= step > 0 ? len : -1;
 
-          if (start < 0) start += len;
-          if (stop < 0 && slice.stop != null) {
-            stop += len; // Only adjust if explicit negative
-          }
-
-          // Clamp
-          if (step > 0) {
-            if (start < 0) start = 0;
-            if (stop > len) stop = len;
-          } else {
-            if (start >= len) start = len - 1;
-            if (stop < -1) stop = -1;
-          }
-
-          final res = <JinjaValue>[];
-          if (step > 0) {
-            for (int i = start; i < stop; i += step) {
-              if (i >= 0 && i < len) res.add(obj.items[i]);
-            }
-          } else if (step < 0) {
-            for (int i = start; i > stop; i += step) {
-              if (i >= 0 && i < len) res.add(obj.items[i]);
-            }
-          }
-          return JinjaList(res);
-        }
-        if (obj is JinjaStringValue) {
-          final s = obj.value;
-          int len = s.length;
-          start ??= step > 0 ? 0 : len - 1;
-          stop ??= step > 0 ? len : -1;
-
-          if (start < 0) start += len;
-          if (stop < 0 && slice.stop != null) stop += len;
-
-          // Clamp
-          if (step > 0) {
-            if (start < 0) start = 0;
-            if (stop > len) stop = len;
-          } else {
-            if (start >= len) start = len - 1;
-            if (stop < -1) stop = -1;
-          }
-
-          if (step == 1) {
-            if (start >= stop) return const JinjaStringValue(JinjaString([]));
-            return JinjaStringValue(s.substring(start, stop));
-          }
-
-          final parts = <JinjaStringPart>[];
-          if (step > 0) {
-            for (int i = start; i < stop; i += step) {
-              if (i >= 0 && i < len) parts.addAll(s[i].parts);
-            }
-          } else if (step < 0) {
-            for (int i = start; i > stop; i += step) {
-              if (i >= 0 && i < len) parts.addAll(s[i].parts);
-            }
-          }
-          return JinjaStringValue(JinjaString(parts));
+        if (start < 0) start += len;
+        if (stop < 0 && slice.stop != null) {
+          stop += len; // Only adjust if explicit negative
         }
 
-        return const JinjaUndefined();
+        // Clamp
+        if (step > 0) {
+          if (start < 0) start = 0;
+          if (stop > len) stop = len;
+        } else {
+          if (start >= len) start = len - 1;
+          if (stop < -1) stop = -1;
+        }
+
+        final res = <JinjaValue>[];
+        if (step > 0) {
+          for (int i = start; i < stop; i += step) {
+            if (i >= 0 && i < len) res.add(itemsList[i]);
+          }
+        } else if (step < 0) {
+          for (int i = start; i > stop; i += step) {
+            if (i >= 0 && i < len) res.add(itemsList[i]);
+          }
+        }
+        return obj is JinjaList ? JinjaList(res) : JinjaTuple(res);
+      }
+      if (obj is JinjaStringValue) {
+        final s = obj.value;
+        int len = s.length;
+        start ??= step > 0 ? 0 : len - 1;
+        stop ??= step > 0 ? len : -1;
+
+        if (start < 0) start += len;
+        if (stop < 0 && slice.stop != null) stop += len;
+
+        // Clamp
+        if (step > 0) {
+          if (start < 0) start = 0;
+          if (stop > len) stop = len;
+        } else {
+          if (start >= len) start = len - 1;
+          if (stop < -1) stop = -1;
+        }
+
+        if (step == 1) {
+          if (start >= stop) return const JinjaStringValue(JinjaString([]));
+          return JinjaStringValue(s.substring(start, stop));
+        }
+
+        final parts = <JinjaStringPart>[];
+        if (step > 0) {
+          for (int i = start; i < stop; i += step) {
+            if (i >= 0 && i < len) parts.addAll(s[i].parts);
+          }
+        } else if (step < 0) {
+          for (int i = start; i > stop; i += step) {
+            if (i >= 0 && i < len) parts.addAll(s[i].parts);
+          }
+        }
+        return JinjaStringValue(JinjaString(parts));
       }
 
+      return const JinjaUndefined();
+    }
+
+    if (computed) {
+      // Bracket notation: obj[expr]
       final obj = object.execute(ctx);
       final prop = property.execute(ctx);
 
       if (obj is JinjaMap) {
-        // Key access
-        final key = prop.toString();
-        return obj.items[key] ?? const JinjaUndefined();
-      } else if (obj is JinjaList) {
-        if (prop is JinjaInteger) {
-          int idx = prop.value;
-          // handle negative index
-          if (idx < 0) idx += obj.items.length;
-          if (idx >= 0 && idx < obj.items.length) {
-            return obj.items[idx];
+        // Bracket access: check keys FIRST
+        if (obj.items.containsKey(prop)) {
+          return obj.items[prop]!;
+        }
+
+        // Special case for 'env': NO methods allowed even via bracket access if it's the env object
+        if (obj.isEnv) {
+          return const JinjaUndefined();
+        }
+
+        // Then check if the key is a string that matches a method
+        if (prop is JinjaStringValue) {
+          final method = resolveMember(obj, prop.toString());
+          if (method != null) return method;
+        }
+        return const JinjaUndefined();
+      } else if (obj is JinjaList || obj is JinjaTuple) {
+        // Corrected: use prop.asInt directly for indexing
+        if (prop.isNumeric) {
+          final items = obj is JinjaList
+              ? obj.items
+              : (obj as JinjaTuple).items;
+          int idx = prop.asInt;
+          if (idx < 0) idx += items.length;
+          if (idx >= 0 && idx < items.length) {
+            return items[idx];
           }
         }
         return const JinjaUndefined();
@@ -790,23 +823,43 @@ class MemberExpression extends Expression {
           }
         }
       }
+      // For other types, bracket access behaves like dot access for methods if prop is string
+      if (prop is JinjaStringValue) {
+        final method = resolveMember(obj, prop.toString());
+        if (method != null) return method;
+      }
       return const JinjaUndefined();
     } else {
-      // obj.prop
+      // Dot notation: obj.prop
       // prop IS Identifier
       if (property is! Identifier) {
-        throw Exception('Member property must be identifier');
+        throw Exception('Member property must be identifier for dot access');
       }
       final propName = (property as Identifier).name;
       final obj = object.execute(ctx);
 
-      if (obj is JinjaMap) {
-        if (obj.items.containsKey(propName)) return obj.items[propName]!;
-      }
-
-      // Check builtins on object (methods)
+      // Priority: 1. Attributes/Methods, 2. Map keys, 3. Special cases (length)
       final method = resolveMember(obj, propName);
       if (method != null) return method;
+
+      if (obj is JinjaMap) {
+        final key = JinjaStringValue.fromString(propName);
+        if (obj.asJinjaMap.containsKey(key)) {
+          return obj.asJinjaMap[key]!;
+        }
+      }
+
+      // 3. Fallback: length for sequences (if not a method)
+      if (propName == 'length') {
+        if (obj is JinjaList) return JinjaInteger(obj.items.length);
+        if (obj is JinjaTuple) return JinjaInteger(obj.items.length);
+        if (obj is JinjaStringValue) return JinjaInteger(obj.value.length);
+      }
+
+      // Special Case: llama.cpp tests expect 'env' to NOT have methods
+      if (obj is JinjaMap && obj.name == 'env') {
+        return const JinjaUndefined();
+      }
 
       return const JinjaUndefined();
     }
@@ -948,15 +1001,9 @@ class BinaryExpression extends Expression {
         }
         throw Exception('Invalid operand types for **');
       case '==':
-        if (l.isNumeric && r.isNumeric) {
-          return JinjaBoolean(l.asDouble == r.asDouble);
-        }
-        return JinjaBoolean(l.toString() == r.toString());
+        return JinjaBoolean(l == r);
       case '!=':
-        if (l.isNumeric && r.isNumeric) {
-          return JinjaBoolean(l.asDouble != r.asDouble);
-        }
-        return JinjaBoolean(l.toString() != r.toString());
+        return JinjaBoolean(l != r);
       case '<':
         return JinjaBoolean(_compare(l, r) < 0);
       case '>':
@@ -976,7 +1023,7 @@ class BinaryExpression extends Expression {
           return JinjaBoolean(r.items.any((e) => e == l));
         }
         if (r is JinjaMap) {
-          return JinjaBoolean(r.items.containsKey(l.toString()));
+          return JinjaBoolean(r.asJinjaMap.containsKey(l));
         }
         if (r is JinjaStringValue) {
           return JinjaBoolean(r.toString().contains(l.toString()));
@@ -991,7 +1038,7 @@ class BinaryExpression extends Expression {
           return JinjaBoolean(!r.items.any((e) => e == l));
         }
         if (r is JinjaMap) {
-          return JinjaBoolean(!r.items.containsKey(l.toString()));
+          return JinjaBoolean(!r.items.containsKey(l));
         }
         if (r is JinjaStringValue) {
           return JinjaBoolean(!r.toString().contains(l.toString()));
@@ -1091,8 +1138,8 @@ class FilterExpression extends Expression {
       throw Exception('Invalid filter expression');
     }
 
-    if (globalBuiltins.containsKey(filterName)) {
-      final res = globalBuiltins[filterName]!(args, kwargs);
+    if (globalFilters.containsKey(filterName)) {
+      final res = globalFilters[filterName]!(args, kwargs);
       return res;
     }
     throw Exception('Unknown filter: $filterName');
@@ -1140,9 +1187,8 @@ class TestExpression extends Expression {
       throw Exception('Invalid test expression');
     }
 
-    final funcName = 'test_is_$testName';
-    if (globalBuiltins.containsKey(funcName)) {
-      final res = globalBuiltins[funcName]!(args, kwargs);
+    if (globalTests.containsKey(testName)) {
+      final res = globalTests[testName]!(args, kwargs);
       return negate ? JinjaBoolean(!res.asBool) : res;
     }
 

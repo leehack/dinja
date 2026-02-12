@@ -58,7 +58,11 @@ void main() {
     });
 
     test('JinjaMap', () {
-      final m = JinjaMap({'key': JinjaStringValue.fromString('value')});
+      final m = JinjaMap({
+        JinjaStringValue.fromString('key'): JinjaStringValue.fromString(
+          'value',
+        ),
+      });
       expect(m.isMap, true);
       expect(m.items.length, 1);
       expect(m.toString(), "{'key': 'value'}");
@@ -103,14 +107,16 @@ void main() {
 
     test('Deep equality for maps', () {
       final m1 = JinjaMap({
-        'a': const JinjaInteger(1),
-        'b': JinjaList([const JinjaInteger(2)]),
+        JinjaStringValue.fromString('a'): const JinjaInteger(1),
+        JinjaStringValue.fromString('b'): JinjaList([const JinjaInteger(2)]),
       });
       final m2 = JinjaMap({
-        'a': const JinjaInteger(1),
-        'b': JinjaList([const JinjaInteger(2)]),
+        JinjaStringValue.fromString('a'): const JinjaInteger(1),
+        JinjaStringValue.fromString('b'): JinjaList([const JinjaInteger(2)]),
       });
-      final m3 = JinjaMap({'a': const JinjaInteger(1)});
+      final m3 = JinjaMap({
+        JinjaStringValue.fromString('a'): const JinjaInteger(1),
+      });
 
       expect(m1 == m2, isTrue);
       expect(m1 == m3, isFalse);
@@ -133,7 +139,12 @@ void main() {
       expect(const JinjaFloat(1.5).toDart(), 1.5);
       expect(const JinjaStringValue(JinjaString([])).toDart(), '');
       expect(JinjaList([const JinjaInteger(1)]).toDart(), [1]);
-      expect(JinjaMap({'a': const JinjaInteger(1)}).toDart(), {'a': 1});
+      expect(
+        JinjaMap({
+          JinjaStringValue.fromString('a'): const JinjaInteger(1),
+        }).toDart(),
+        {'a': 1},
+      );
     });
   });
 
@@ -209,7 +220,7 @@ void main() {
     });
 
     test('JinjaMap', () {
-      final m = JinjaMap({'a': JinjaInteger(1)});
+      final m = JinjaMap({JinjaStringValue.fromString('a'): JinjaInteger(1)});
       expect(m.isMap, true);
       expect(m.asBool, true);
 

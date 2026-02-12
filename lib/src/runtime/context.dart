@@ -1,4 +1,5 @@
 import '../types/value.dart';
+import 'builtins.dart';
 
 /// Manages the execution context and variable scopes.
 class Context {
@@ -21,6 +22,10 @@ class Context {
         'False': const JinjaBoolean(false),
         'none': const JinjaNone(),
         'None': const JinjaNone(),
+        'env': JinjaMap({
+          val('trim_blocks'): const JinjaBoolean(false),
+          val('lstrip_blocks'): const JinjaBoolean(false),
+        }, name: 'env'),
       } {
     if (parent != null) {
       // Inherit variables from parent
@@ -32,7 +37,25 @@ class Context {
   /// Look up a variable by name. Returns [JinjaUndefined] if not found.
   JinjaValue get(String name) {
     if (environment.containsKey(name)) {
-      return environment[name]!;
+      var v = environment[name]!;
+      if (name == 'env' && v is JinjaMap) {
+        // Special case for 'env': llama.cpp tests expect it to NOT have object methods
+        // like .get(), .items(), etc. as attributes.
+        // Since our JinjaMap resolution favors methods, we need to return a wrapper
+        // or just the raw map items?
+        // Actually, if we return it as a JinjaValue that is NOT a JinjaMap but behaves like one...
+        // For now, let's just use the fact that it's 'env' to skip method resolution in MemberExpression?
+        // Or here, we can return a version of it that hides its methods.
+        // For now, we return a JinjaMap, but the MemberExpression resolver will need to handle 'env' specially.
+        // If we need to hide methods, we'd return a custom JinjaValue that wraps the map but doesn't expose methods.
+        // For now, returning the JinjaMap directly, assuming the caller (MemberExpression) will handle the 'env' special case.
+      }
+      return v;
+    }
+    // Only check globalFunctions or globalTests if we want them as variables?
+    // In Jinja, globals include functions. Filters are NOT identifiers.
+    if (globalFunctions.containsKey(name)) {
+      return JinjaFunction(name, globalFunctions[name]!);
     }
     return JinjaUndefined(name);
   }
