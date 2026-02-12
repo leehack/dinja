@@ -1,3 +1,9 @@
+[![pub package](https://img.shields.io/pub/v/dinja.svg)](https://pub.dev/packages/dinja)
+[![pub points](https://img.shields.io/pub/points/dinja.svg)](https://pub.dev/packages/dinja/score)
+[![Build Status](https://github.com/leehack/dinja/actions/workflows/dart.yml/badge.svg)](https://github.com/leehack/dinja/actions/workflows/dart.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/leehack/dinja/branch/main/graph/badge.svg)](https://codecov.io/gh/leehack/dinja)
+
 # Dinja
 
 A minimal, zero-dependency Jinja templating engine for Dart, ported from `llama.cpp`. Focused on security, efficiency, and input marking.
