@@ -1,3 +1,7 @@
+## Unreleased
+
+- Added `package:dinja/ast.dart`, exposing the lexer, parser and AST node types so template analysis can reach them without importing `src/`. `package:dinja/dinja.dart` is unchanged.
+
 ## 1.0.0
 
 - Initial release of Dinja.
