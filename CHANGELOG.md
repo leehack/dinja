@@ -1,5 +1,11 @@
 ## Unreleased
 
+- Fixed macro keyword arguments binding by position, which rendered `greet(last='Smith', first='John')` with empty values and made `add(1, b=10)` throw. Arguments now bind positionally, then by name, then from defaults, as in llama.cpp and Jinja2, including `caller(...)` arguments in a `{% call %}` block. A missing required argument throws `Not enough arguments provided`, as in llama.cpp; an unknown keyword or a keyword repeating a positional argument throws, as in Jinja2.
+- Fixed unary `-` and `+` failing to parse before anything but a number literal, as in `{{ -n }}`, `{{ items[:-n] }}` and `{{ not -n }}`. As in llama.cpp and Jinja2, they bind tighter than filters, tests and `**`: `-n|abs` is `(-n)|abs`.
+- Fixed `min` and `max` with `attribute` returning the attribute value instead of the item, as Jinja2 does. `attribute` can also be the second positional argument.
+- Added llama.cpp's numeric member access (`{{ items.0 }}`, `{{ {10: 'Bob'}.10 }}`), empty subscript (`a[]` is undefined), `int * str` repetition, string `indent` width (`indent('> ')`) and `str.format` with `{}` placeholders. Other `format` fields, such as `{0}`, `{name}`, `{{` and `{:>5}`, throw, as in llama.cpp.
+- Added `BlankExpression` to `package:dinja/ast.dart` for the `a[]` subscript.
+- Fixed the README and `example/security_example.dart` claiming that plain strings passed to `render` are escaped; only values wrapped in `JinjaString.user` are.
 - Fixed `tojson` to match llama.cpp: `json.dumps` spacing (`{"a": 1, "b": [1, 2]}`), non-ASCII kept unless `ensure_ascii=true`, floats formatted as C++ `%g` with 6 significant digits (`1.0` is `1`, `3.14159265` is `3.14159`), non-string keys converted to strings, and positional arguments read as `(ensure_ascii, indent, separators, sort_keys)`. A negative or non-integer `indent` now gives one-line output, and one separator sets only the item separator.
 - Fixed printing a list, dict or tuple HTML-escaping its quotes: `{{ [1, '1'] }}` now prints `[1, '1']`. Input-marked items are still escaped.
 - Fixed `-0.0` and numbers outside the 64-bit integer range passed to `render` becoming integers on the web; they are now floats, as on the VM. Other whole-number doubles are still integers on the web, where they are indistinguishable from `int`.

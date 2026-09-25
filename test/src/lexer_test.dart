@@ -95,6 +95,29 @@ void main() {
     });
   });
 
+  group('Minus after not', () {
+    List<(TokenType, String)> lex(String source) => [
+      for (final t in Lexer(source).tokenize().tokens) (t.type, t.value),
+    ];
+
+    test('is unary after the not operator', () {
+      expect(lex('{{ not -n }}')[2], (TokenType.unaryOperator, '-'));
+      expect(lex('{{ not -1 }}')[2], (TokenType.numericLiteral, '-1'));
+      expect(lex('{{ x is not +1 }}')[4], (TokenType.numericLiteral, '+1'));
+    });
+
+    test('stays binary after a member or filter named not', () {
+      expect(lex('{{ x.not - 1 }}')[4], (
+        TokenType.additiveBinaryOperator,
+        '-',
+      ));
+      expect(lex('{{ x|not - 1 }}')[4], (
+        TokenType.additiveBinaryOperator,
+        '-',
+      ));
+    });
+  });
+
   group('Lexer Error Location', () {
     test('unterminated string', () {
       const source = 'Hello\n{{ "world';

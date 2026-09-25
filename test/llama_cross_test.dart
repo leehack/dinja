@@ -4,16 +4,14 @@ import 'package:dinja/dinja.dart';
 void main() {
   group('Llama.cpp Cross Tests', () {
     test('trim_blocks removes newline after tag', () {
-      final template = Template(
-        '{% if true %}\n"        "hello\n"        "{% endif %}\n',
-      );
+      final template = Template('{% if true %}\nhello\n{% endif %}\n');
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('hello\n'));
     });
 
     test('lstrip_blocks removes leading whitespace', () {
       final template = Template(
-        '    {% if true %}\n"        "    hello\n"        "    {% endif %}\n',
+        '    {% if true %}\n    hello\n    {% endif %}\n',
       );
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('    hello\n'));
@@ -21,7 +19,7 @@ void main() {
 
     test('for loop with trim_blocks', () {
       final template = Template(
-        '{% for i in items %}\n"        "{{ i }}\n"        "{% endfor %}\n',
+        '{% for i in items %}\n{{ i }}\n{% endfor %}\n',
       );
       final Map<String, dynamic> data = {
         "items": [1, 2, 3],
@@ -31,7 +29,7 @@ void main() {
 
     test('explicit strip both', () {
       final template = Template(
-        '  {%- if true -%}  \n"        "hello\n"        "  {%- endif -%}  \n',
+        '  {%- if true -%}  \nhello\n  {%- endif -%}  \n',
       );
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('hello'));
@@ -176,7 +174,7 @@ void main() {
     test('is undefined key falsy', () {
       final template = Template('{{ \'yes\' if not y[\'x\'] else \'no\' }}');
       final Map<String, dynamic> data = {
-        "y": [[]],
+        "y": [null],
       };
       expect(template.render(data), equals('yes'));
     });
@@ -342,12 +340,44 @@ void main() {
       expect(template.render(data), equals('42'));
     });
 
+    test('none in object', () {
+      final template = Template('{{ x in {\'low\': 1, \'high\': 2} }}');
+      final Map<String, dynamic> data = {"x": null};
+      expect(template.render(data), equals('False'));
+    });
+
+    test('none not in object', () {
+      final template = Template('{{ x not in {\'low\': 1, \'high\': 2} }}');
+      final Map<String, dynamic> data = {"x": null};
+      expect(template.render(data), equals('True'));
+    });
+
+    test('none in array', () {
+      final template = Template('{{ x in [1, none, 3] }}');
+      final Map<String, dynamic> data = {"x": null};
+      expect(template.render(data), equals('True'));
+    });
+
     test('dot notation', () {
       final template = Template('{{ user.name }}');
       final Map<String, dynamic> data = {
         "user": {"name": "Bob"},
       };
       expect(template.render(data), equals('Bob'));
+    });
+
+    test('dot notation (integer property)', () {
+      final template = Template('{{ {10: \'Bob\'}.10 }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('Bob'));
+    });
+
+    test('dot notation (array index)', () {
+      final template = Template('{{ user.10 }}');
+      final Map<String, dynamic> data = {
+        "user": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+      };
+      expect(template.render(data), equals('k'));
     });
 
     test('negative float (not dot notation)', () {
@@ -362,6 +392,30 @@ void main() {
         "user": {"name": "Bob"},
       };
       expect(template.render(data), equals('Bob'));
+    });
+
+    test('empty computed member defaults to undefined', () {
+      final template = Template('{{ a[]|default(\'fallback\') }}');
+      final Map<String, dynamic> data = {
+        "a": {"name": "Bob"},
+      };
+      expect(template.render(data), equals('fallback'));
+    });
+
+    test('empty computed member is undefined', () {
+      final template = Template('{{ a[] is undefined }}');
+      final Map<String, dynamic> data = {
+        "a": {"name": "Bob"},
+      };
+      expect(template.render(data), equals('True'));
+    });
+
+    test('undefined computed member is undefined', () {
+      final template = Template('{{ a[undefined] is undefined }}');
+      final Map<String, dynamic> data = {
+        "a": {"name": "Bob"},
+      };
+      expect(template.render(data), equals('True'));
     });
 
     test('array access', () {
@@ -388,6 +442,51 @@ void main() {
       expect(template.render(data), equals('[\'b\']'));
     });
 
+    test('array slice negative variable', () {
+      final template = Template('{{ items[:-n]|string }}');
+      final Map<String, dynamic> data = {
+        "items": ["a", "b", "c"],
+        "n": 1,
+      };
+      expect(template.render(data), equals('[\'a\', \'b\']'));
+    });
+
+    test('array slice negative variable indent', () {
+      final template = Template('{{ indent[:-indent_factor] }}');
+      final Map<String, dynamic> data = {"indent": "    ", "indent_factor": 2};
+      expect(template.render(data), equals('  '));
+    });
+
+    test('unary minus variable', () {
+      final template = Template('{{ -n }}');
+      final Map<String, dynamic> data = {"n": 3};
+      expect(template.render(data), equals('-3'));
+    });
+
+    test('unary plus variable', () {
+      final template = Template('{{ +n }}');
+      final Map<String, dynamic> data = {"n": -3};
+      expect(template.render(data), equals('-3'));
+    });
+
+    test('unary plus float', () {
+      final template = Template('{{ +x }}');
+      final Map<String, dynamic> data = {"x": -1.5};
+      expect(template.render(data), equals('-1.5'));
+    });
+
+    test('unary minus then abs filter', () {
+      final template = Template('{{ -n|abs }}');
+      final Map<String, dynamic> data = {"n": -3};
+      expect(template.render(data), equals('3'));
+    });
+
+    test('unary minus then number test', () {
+      final template = Template('{{ -n is number }}');
+      final Map<String, dynamic> data = {"n": 3};
+      expect(template.render(data), equals('True'));
+    });
+
     test('array slice step', () {
       final template = Template('{{ items[::2]|string }}');
       final Map<String, dynamic> data = {
@@ -402,6 +501,24 @@ void main() {
       expect(template.render(data), equals('(\'c\', \'b\', \'a\')'));
     });
 
+    test('string slice negative step', () {
+      final template = Template('{{ \'abcdef\'[::-2] }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('fdb'));
+    });
+
+    test('string slice negative start and step', () {
+      final template = Template('{{ \'abcdef\'[-1:1:-1] }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('fedc'));
+    });
+
+    test('string slice negative start, stop and step', () {
+      final template = Template('{{ \'abcdef\'[-1:-5:-1] }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('fedc'));
+    });
+
     test('arithmetic', () {
       final template = Template('{{ (a + b) * c }}');
       final Map<String, dynamic> data = {"a": 2, "b": 3, "c": 4};
@@ -412,6 +529,18 @@ void main() {
       final template = Template('{{ \'hello\' ~ \' \' ~ \'world\' }}');
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('hello world'));
+    });
+
+    test('string repetition', () {
+      final template = Template('{{ \'ab\' * 3 }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('ababab'));
+    });
+
+    test('reversed string repetition', () {
+      final template = Template('{{ 3 * \'ab\' }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('ababab'));
     });
 
     test('ternary', () {
@@ -504,6 +633,22 @@ void main() {
       expect(template.render(data), equals('hello'));
     });
 
+    test('upper array', () {
+      final template = Template('{{ items|upper }}');
+      final Map<String, dynamic> data = {
+        "items": ["hello", "world"],
+      };
+      expect(template.render(data), equals('[\'HELLO\', \'WORLD\']'));
+    });
+
+    test('upper dict', () {
+      final template = Template('{{ items|upper }}');
+      final Map<String, dynamic> data = {
+        "items": {"hello": "world"},
+      };
+      expect(template.render(data), equals('{\'HELLO\': \'WORLD\'}'));
+    });
+
     test('capitalize', () {
       final template = Template('{{ \'heLlo World\'|capitalize }}');
       final Map<String, dynamic> data = {};
@@ -542,8 +687,8 @@ void main() {
       expect(template.render(data), equals('hello jinja'));
     });
 
-    test('length list', () {
-      final template = Template('{{ items|length }}');
+    test('length (count alias) list', () {
+      final template = Template('{{ items|count }}');
       final Map<String, dynamic> data = {
         "items": [1, 2, 3],
       };
@@ -680,8 +825,8 @@ void main() {
       expect(template.render(data), equals('fallback'));
     });
 
-    test('default with falsy value', () {
-      final template = Template('{{ \'\'|default(\'fallback\', true) }}');
+    test('default (d alias) with falsy value', () {
+      final template = Template('{{ \'\'|d(\'fallback\', true) }}');
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('fallback'));
     });
@@ -692,13 +837,61 @@ void main() {
       expect(template.render(data), equals('"\\u2713"'));
     });
 
+    test('tojson ensure_ascii=true nested object', () {
+      final template = Template('{{ data|tojson(ensure_ascii=true) }}');
+      final Map<String, dynamic> data = {
+        "data": {
+          "text": "\u2713",
+          "items": [
+            "é",
+            {"snowman": "☃"},
+          ],
+        },
+      };
+      expect(
+        template.render(data),
+        equals(
+          '{"text": "\\u2713", "items": ["\\u00e9", {"snowman": "\\u2603"}]}',
+        ),
+      );
+    });
+
+    test('tojson ensure_ascii=true indent=2', () {
+      final template = Template(
+        '{{ data|tojson(ensure_ascii=true, indent=2) }}',
+      );
+      final Map<String, dynamic> data = {
+        "data": {
+          "text": "\u2713",
+          "nested": {"accent": "é"},
+        },
+      };
+      expect(
+        template.render(data),
+        equals(
+          '{\n  "text": "\\u2713",\n  "nested": {\n    "accent": "\\u00e9"\n  }\n}',
+        ),
+      );
+    });
+
+    test('tojson ensure_ascii=true preserves existing escapes', () {
+      final template = Template('{{ data|tojson(ensure_ascii=true) }}');
+      final Map<String, dynamic> data = {
+        "data": {"emoji": "😀", "line": "a\nb"},
+      };
+      expect(
+        template.render(data),
+        equals('{"emoji": "\\ud83d\\ude00", "line": "a\\nb"}'),
+      );
+    });
+
     test('tojson sort_keys=true', () {
       final template = Template('{{ data|tojson(sort_keys=true) }}');
       final Map<String, dynamic> data = {
         "data": {"b": 2, "a": 1},
       };
       expect(template.render(data), equals('{"a": 1, "b": 2}'));
-    });
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
 
     test('tojson', () {
       final template = Template('{{ data|tojson }}');
@@ -752,10 +945,60 @@ void main() {
       );
     });
 
+    test('indent', () {
+      final template = Template('{{ data|indent(2) }}');
+      final Map<String, dynamic> data = {"data": "foo\nbar"};
+      expect(template.render(data), equals('foo\n  bar'));
+    });
+
+    test('indent first only', () {
+      final template = Template('{{ data|indent(width=3,first=true) }}');
+      final Map<String, dynamic> data = {"data": "foo\nbar"};
+      expect(template.render(data), equals('   foo\n   bar'));
+    });
+
+    test('indent blank lines and first line', () {
+      final template = Template(
+        '{{ data|indent(width=5,blank=true,first=true) }}',
+      );
+      final Map<String, dynamic> data = {"data": "foo\n\nbar"};
+      expect(template.render(data), equals('     foo\n     \n     bar'));
+    });
+
+    test('indent with default width', () {
+      final template = Template('{{ data|indent() }}');
+      final Map<String, dynamic> data = {"data": "foo\nbar"};
+      expect(template.render(data), equals('foo\n    bar'));
+    });
+
+    test('indent with no newline', () {
+      final template = Template('{{ data|indent }}');
+      final Map<String, dynamic> data = {"data": "foo"};
+      expect(template.render(data), equals('foo'));
+    });
+
+    test('indent with trailing newline', () {
+      final template = Template('{{ data|indent(blank=true) }}');
+      final Map<String, dynamic> data = {"data": "foo\n"};
+      expect(template.render(data), equals('foo\n    '));
+    });
+
+    test('indent with string', () {
+      final template = Template('{{ data|indent(width=\'>>>>\') }}');
+      final Map<String, dynamic> data = {"data": "foo\nbar"};
+      expect(template.render(data), equals('foo\n>>>>bar'));
+    });
+
     test('chained filters', () {
       final template = Template('{{ \'  HELLO  \'|trim|lower }}');
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('hello'));
+    });
+
+    test('int filter on integer is identity', () {
+      final template = Template('{{ value|int }}');
+      final Map<String, dynamic> data = {"value": 7};
+      expect(template.render(data), equals('7'));
     });
 
     test('none to string', () {
@@ -902,6 +1145,43 @@ void main() {
       expect(template.render(data), equals('Hi Guest'));
     });
 
+    test('macro kwargs input', () {
+      final template = Template(
+        '{% macro my_func(a, b=False) %}{% if b %}{{ a }}{% else %}nope{% endif %}{% endmacro %}{{ my_func(1, b=True) }}',
+      );
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('1'));
+    });
+
+    test('macro with multiple args', () {
+      final template = Template(
+        '{% macro add(a, b, c=0) %}{{ a + b + c }}{% endmacro %}{{ add(1, 2) }},{{ add(1, 2, 3) }},{{ add(1, b=10) }},{{ add(1, 2, c=5) }}',
+      );
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('3,6,11,8'));
+    });
+
+    test('macro with kwarg out-of-order input', () {
+      final template = Template(
+        '{% macro greet(first, last, greeting=\'Hello\') %}{{ greeting }}, {{ first }} {{ last }}{% endmacro %}{{ greet(last=\'Smith\', first=\'John\') }},{{ greet(last=\'Doe\', greeting=\'Hi\', first=\'Jane\') }}',
+      );
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('Hello, John Smith,Hi, Jane Doe'));
+    });
+
+    test('macro with caller', () {
+      final template = Template(
+        '{%- macro nest_dict(o, i, ff=\'\') %}\n  {{- caller(ff) }}\n  {%- for k, v in o|items %}\n    {{- i + k + \': \' }}\n    {%- if v is mapping %}\n      {{- \'{\' }}\n      {% call(f) nest_dict(v, i + \'    \') %}\n        {{- \'fail\' if ff is undefined }}\n      {%- endcall %}\n      {{- i + \'}\' }}\n    {% else %}\n      {{- v|string }}\n    {% endif %}\n  {%- endfor %}\n{%- endmacro %}\n{%- call(f) nest_dict({\'root1\': 1, \'root2\': {\'nest1\': 1, \'nest2\': {\'nest3\': 2}}}, \'    \', \'Dict\') %}\n  {{- \'fail\' if ff is defined }}\n  {{- f + \' {\' }}\n{% endcall %}\n{{- \'}\' }}',
+      );
+      final Map<String, dynamic> data = {};
+      expect(
+        template.render(data),
+        equals(
+          'Dict {\n    root1: 1\n    root2: {\n        nest1: 1\n        nest2: {\n            nest3: 2\n        }\n    }\n}',
+        ),
+      );
+    });
+
     test('namespace counter', () {
       final template = Template(
         '{% set ns = namespace(count=0) %}{% for i in range(3) %}{% set ns.count = ns.count + 1 %}{% endfor %}{{ ns.count }}',
@@ -1010,7 +1290,7 @@ void main() {
       final template = Template('{{ \'yes\' if x is sameas(false) }}');
       final Map<String, dynamic> data = {"x": false};
       expect(template.render(data), equals('yes'));
-    });
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
 
     test('is boolean', () {
       final template = Template('{{ \'yes\' if x is boolean }}');
@@ -1028,13 +1308,13 @@ void main() {
       final template = Template('{{ \'yes\' if \'foo\'|safe is escaped }}');
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('yes'));
-    });
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
 
     test('is filter', () {
       final template = Template('{{ \'yes\' if \'trim\' is filter }}');
       final Map<String, dynamic> data = {};
       expect(template.render(data), equals('yes'));
-    });
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
 
     test('is float', () {
       final template = Template('{{ \'yes\' if x is float }}');
@@ -1264,10 +1544,48 @@ void main() {
       expect(template.render(data), equals('hello jinja'));
     });
 
+    test('string.replace() empty', () {
+      final template = Template('{{ s.replace(\'\', \'.\') }}');
+      final Map<String, dynamic> data = {"s": "hello world"};
+      expect(template.render(data), equals('.h.e.l.l.o. .w.o.r.l.d.'));
+    });
+
     test('string.replace() with count', () {
       final template = Template('{{ s.replace(\'a\', \'X\', 2) }}');
       final Map<String, dynamic> data = {"s": "banana"};
       expect(template.render(data), equals('bXnXna'));
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
+
+    test('string.format() auto numbering', () {
+      final template = Template('{{ \'<{}|{}>\'.format(s, 42) }}');
+      final Map<String, dynamic> data = {"s": "hello"};
+      expect(template.render(data), equals('<hello|42>'));
+    });
+
+    test('string.format() manual numbering', () {
+      final template = Template('{{ \'{1}-{0}-{1}\'.format(\'a\', \'b\') }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('b-a-b'));
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
+
+    test('string.format() named fields', () {
+      final template = Template(
+        '{{ \'{name} is {age}\'.format(name=\'Bob\', age=7) }}',
+      );
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('Bob is 7'));
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
+
+    test('string.format() escaped braces', () {
+      final template = Template('{{ \'{{}} {} {{x}}\'.format(\'mid\') }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('{} mid {x}'));
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
+
+    test('string.format() no fields', () {
+      final template = Template('{{ \'plain\'.format() }}');
+      final Map<String, dynamic> data = {};
+      expect(template.render(data), equals('plain'));
     });
 
     test('undefined|capitalize', () {
@@ -1539,7 +1857,47 @@ void main() {
         "arr": ["1", "2", "3"],
       };
       expect(template.render(data), equals('6'));
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
+
+    test('array|min', () {
+      final template = Template('{{ [tool_calls_count, tool_sep_count]|min }}');
+      final Map<String, dynamic> data = {
+        "tool_calls_count": 2,
+        "tool_sep_count": 1,
+      };
+      expect(template.render(data), equals('1'));
     });
+
+    test('array|max', () {
+      final template = Template('{{ [tool_calls_count, tool_sep_count]|max }}');
+      final Map<String, dynamic> data = {
+        "tool_calls_count": 2,
+        "tool_sep_count": 1,
+      };
+      expect(template.render(data), equals('2'));
+    });
+
+    test('array|min attribute', () {
+      final template = Template('{{ items|min(attribute=\'x\') }}');
+      final Map<String, dynamic> data = {
+        "items": [
+          {"x": 2},
+          {"x": 1},
+        ],
+      };
+      expect(template.render(data), equals('{\'x\': 1}'));
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
+
+    test('array|max attribute', () {
+      final template = Template('{{ items|max(attribute=\'x\') }}');
+      final Map<String, dynamic> data = {
+        "items": [
+          {"x": 2},
+          {"x": 1},
+        ],
+      };
+      expect(template.render(data), equals('{\'x\': 2}'));
+    }, skip: 'Not implemented in llama.cpp 7fe450e1');
 
     test('undefined|select', () {
       final template = Template(
