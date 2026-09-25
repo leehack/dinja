@@ -1,3 +1,9 @@
+## Unreleased
+
+- Fixed `tojson` to match llama.cpp: `json.dumps` spacing (`{"a": 1, "b": [1, 2]}`), non-ASCII kept unless `ensure_ascii=true`, floats formatted as C++ `%g` with 6 significant digits (`1.0` is `1`, `3.14159265` is `3.14159`), non-string keys converted to strings, and positional arguments read as `(ensure_ascii, indent, separators, sort_keys)`. A negative or non-integer `indent` now gives one-line output, and one separator sets only the item separator.
+- Fixed printing a list, dict or tuple HTML-escaping its quotes: `{{ [1, '1'] }}` now prints `[1, '1']`. Input-marked items are still escaped.
+- Changed list, dict and tuple string conversion to match llama.cpp: a string item containing `'` is written in JSON form, as in `["it's"]`.
+
 ## 1.1.0
 
 - Added `package:dinja/ast.dart` for template analysis without importing `src/`: `parseTemplate`, which parses a template into a `Program`; the AST node types; and `LexerException` and `ParserException`. `package:dinja/dinja.dart` is unchanged.

@@ -3,9 +3,10 @@ import re
 import json
 import os
 import subprocess
+import sys
 
-# Path to the C++ test file
-CPP_TEST_FILE = '../llama.cpp/tests/test-jinja.cpp'
+# Path to the C++ test file; pass another path as the first argument
+CPP_TEST_FILE = sys.argv[1] if len(sys.argv) > 1 else '../llama.cpp/tests/test-jinja.cpp'
 # Output Dart test file
 DART_TEST_FILE = 'test/llama_cross_test.dart'
 
@@ -311,21 +312,7 @@ void main() {
         name = test['name'].replace("'", "\\'")
         tmpl = test['template'].replace("'", "\\'").replace('\n', '\\n')
         
-        # Normalize tojson expectations (Dinja produces compact JSON)
-        raw_expect = test['expected']
-        if 'tojson' in name:
-             # Try to unescape C++ string to get real JSON
-             # C++ string might have \" for quotes.
-             candidate = raw_expect.replace('\\"', '"').replace('\\\\', '\\')
-             if candidate.strip().startswith('{') or candidate.strip().startswith('['):
-                 try:
-                     import json
-                     obj = json.loads(candidate)
-                     raw_expect = json.dumps(obj, separators=(',', ':'))
-                 except:
-                     pass
-
-        expect = raw_expect.replace("'", "\\'").replace('\n', '\\n')
+        expect = test['expected'].replace("'", "\\'").replace('\n', '\\n')
         data = test['data']
         
         try:

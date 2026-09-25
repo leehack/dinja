@@ -1,6 +1,7 @@
 import 'package:meta/meta.dart';
 
 import 'jinja_string.dart';
+import 'repr.dart';
 
 /// Base class for all runtime values under the Dinja type system.
 @immutable
@@ -261,7 +262,7 @@ class JinjaStringValue extends JinjaValue {
   bool get isString => true;
 
   @override
-  String get asRepr => "'${value.toString().replaceAll("'", "\\'")}'";
+  String get asRepr => reprOf(this).toString();
 
   @override
   bool get isSafe => value.isSafe;
@@ -319,9 +320,7 @@ class JinjaList extends JinjaValue {
   }
 
   @override
-  String toString() {
-    return '[${items.map((e) => e.asRepr).join(', ')}]';
-  }
+  String toString() => reprOf(this).toString();
 
   @override
   Object? toDart() => items.map((e) => e.toDart()).toList();
@@ -374,9 +373,7 @@ class JinjaMap extends JinjaValue {
   }
 
   @override
-  String toString() {
-    return '{${items.entries.map((e) => '${e.key.asRepr}: ${e.value.asRepr}').join(', ')}}';
-  }
+  String toString() => reprOf(this).toString();
 
   @override
   Object? toDart() => items.map((k, v) => MapEntry(k.toDart(), v.toDart()));
@@ -438,9 +435,7 @@ class JinjaTuple extends JinjaValue {
   }
 
   @override
-  String toString() {
-    return '(${items.map((e) => e.asRepr).join(', ')})';
-  }
+  String toString() => reprOf(this).toString();
 
   @override
   Object? toDart() => items.map((e) => e.toDart()).toList();
