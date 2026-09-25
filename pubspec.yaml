@@ -1,6 +1,6 @@
 name: dinja
 description: A minimal, zero-dependency Jinja templating engine for Dart, ported from llama.cpp. Focused on security and efficiency.
-version: 1.1.0
+version: 1.1.1
 repository: https://github.com/leehack/dinja
 issue_tracker: https://github.com/leehack/dinja/issues
 topics:
