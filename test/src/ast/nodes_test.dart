@@ -163,6 +163,17 @@ void main() {
       });
     }
 
+    // Jinja2 3.1.6 gives this output; llama.cpp 7fe450e1 drops `c=3` and
+    // prints `10`.
+    test('unchanged: a keyword after an unfilled parameter', () {
+      expect(
+        Template(
+          '{% macro g(a, b, c=0) %}{{ a }}{{ c }}{% endmacro %}{{ g(1, c=3) }}',
+        ).render(),
+        '13',
+      );
+    });
+
     for (final (source, expected) in [
       ('$pair{{ f(1, 2, 3) }}', '[1|2]'),
       ('$pair{{ f(nope) }}', '[|2]'),
@@ -189,6 +200,11 @@ void main() {
         '{% macro f(a) %}<{{ caller() }}>{% endmacro %}'
             '{% call(p) f(1) %}{{ p }}{% endcall %}',
         "Not enough arguments provided to 'caller'",
+      ),
+      (
+        '{% macro f(a) %}{{ caller() }}{% endmacro %}'
+            '{% call f() %}x{% endcall %}',
+        "Not enough arguments provided to 'f'",
       ),
       ('$pair{{ f(1, z=3) }}', "macro 'f' takes no keyword argument 'z'"),
       (
