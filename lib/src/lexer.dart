@@ -345,17 +345,29 @@ class Lexer {
         }
 
         String text = src.substring(textStart, textEnd);
+        final nextIsTag = pos < src.length;
 
-        // A. trim_blocks: remove first newline after block
-        if (optTrimBlocks && lastBlockCanRmNewline) {
-          if (text.startsWith('\n')) {
-            text = text.substring(1);
-          } else if (text.startsWith('\r\n')) {
-            text = text.substring(2);
+        // A. lstrip_blocks: remove the indentation before a `{%` or `{#` that
+        // starts a line. Checked before trim_blocks removes the newline that
+        // starts the line, as llama.cpp does.
+        if (optLstripBlocks && nextIsTag && nextPosIs(['%', '#'])) {
+          int i = text.length;
+          while (i > 0 &&
+              text.codeUnitAt(i - 1) != 10 &&
+              isSpace(text.codeUnitAt(i - 1))) {
+            i--;
+          }
+          if (i > 0 ? text.codeUnitAt(i - 1) == 10 : textStart == 0) {
+            text = text.substring(0, i);
           }
         }
 
-        // B. rstrip (from PREVIOUS block): strip leading whitespace
+        // B. trim_blocks: remove the first newline after a `%}` or `#}`
+        if (optTrimBlocks && lastBlockCanRmNewline && text.startsWith('\n')) {
+          text = text.substring(1);
+        }
+
+        // C. `-%}`, `-}}` or `-#}` before the text: strip its leading whitespace
         if (isRstripBlock) {
           int i = 0;
           while (i < text.length && isSpace(text.codeUnitAt(i))) {
@@ -364,79 +376,12 @@ class Lexer {
           text = text.substring(i);
         }
 
-        // C. lstrip_blocks & explicit lstrip (-) from NEXT block
-        bool nextIsLstrip = false;
-        if (pos < src.length && src[pos] == '{') {
-          if (nextPosIs(['-'], offset: 2)) {
-            nextIsLstrip = true;
-          } else if (optLstripBlocks &&
-              (nextPosIs(['%']) || nextPosIs(['#']))) {
-            // Check if there is only whitespace between last newline (or start of text) and the tag
-            int lastNewline = text.lastIndexOf('\n');
-            if (lastNewline == -1) lastNewline = -1; // handle start of string
-
-            bool onlySpace = true;
-            for (int i = lastNewline + 1; i < text.length; i++) {
-              if (!isSpace(text.codeUnitAt(i))) {
-                onlySpace = false;
-                break;
-              }
-            }
-            if (onlySpace) {
-              // If we didn't find a newline in THIS text block, we must check if the
-              // previous block ended with a newline (or we are at start of file).
-              // Otherwise, we are stripping inline whitespace, which is wrong.
-              if (lastNewline == -1) {
-                if (textStart == 0) {
-                  nextIsLstrip = true;
-                } else {
-                  final prevChar = src.codeUnitAt(textStart - 1);
-                  if (prevChar == 10 || prevChar == 13) {
-                    // \n or \r
-                    nextIsLstrip = true;
-                  }
-                }
-              } else {
-                nextIsLstrip = true;
-              }
-            }
-          }
-        }
-
-        if (nextIsLstrip) {
-          // Explicit lstrip (-) strips ALL whitespace (including newlines)
-          // Implicit lstrip_blocks strips ONLY indentation (spaces/tabs)
-
-          bool isExplicit = false;
-          if (pos < src.length && src[pos] == '{') {
-            if (nextPosIs(['-'], offset: 2)) isExplicit = true;
-          }
-
+        // D. `{%-`, `{{-` or `{#-` after the text: strip its trailing whitespace
+        if (nextIsTag && nextPosIs(['-'], offset: 2)) {
           int i = text.length;
-
-          if (isExplicit) {
-            while (i > 0 && isSpace(text.codeUnitAt(i - 1))) {
-              i--;
-            }
-          } else {
-            // Implicit: only strip horizontal whitespace
-            while (i > 0) {
-              final c = text.codeUnitAt(i - 1);
-              if (c == 32 || c == 9) {
-                i--;
-              } else {
-                break;
-              }
-            }
+          while (i > 0 && isSpace(text.codeUnitAt(i - 1))) {
+            i--;
           }
-
-          // Implicit lstrip NEVER strips newlines automatically from the previous block loop.
-          // But strict Jinja2 wording: "strips from start of line".
-          // If we had `hello\n   {%`, implicit strips `   `. `hello\n` remains.
-          // If we had `{%` at start of line, `\n` from previous line remains?
-          // Jinja2: "indentation is removed". Indentation is spaces/tabs.
-          // So implicit behavior is correct with horizontal check.
-
           text = text.substring(0, i);
         }
 

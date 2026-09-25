@@ -1238,4 +1238,59 @@ void main() {
       });
     }
   });
+
+  group('Filters on none', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    const cases = {
+      '{{ x | selectattr("a") | list | length }}': '0',
+      '{{ x | selectattr("type", "equalto", "x") | list | tojson }}': '[]',
+      '{{ x | rejectattr("a") | list | tojson }}': '[]',
+      '{{ x | select("odd") | list | tojson }}': '[]',
+      '{{ x | reject("odd") | list | tojson }}': '[]',
+      '{{ x | map("upper") | list | tojson }}': '[]',
+      '{{ x | map(attribute="a") | list | tojson }}': '[]',
+      '{% for y in x | selectattr("a") %}{{ y }}{% endfor %}.': '.',
+    };
+    cases.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render({'x': null}), expected);
+      });
+    });
+
+    test('unique gives an empty list', () {
+      // llama.cpp 7fe450e1 output; Jinja2 raises.
+      expect(
+        Template('{{ x | unique | list | tojson }}').render({'x': null}),
+        '[]',
+      );
+    });
+
+    test('default replaces none', () {
+      // llama.cpp 7fe450e1 output; Jinja2 keeps none.
+      for (final source in [
+        '{{ x | default("d") }}',
+        '{{ x | default("d", false) }}',
+        '{{ x | d("d") }}',
+      ]) {
+        expect(Template(source).render({'x': null}), 'd', reason: source);
+      }
+    });
+
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    const guards = {
+      '{{ "" | default("d") }}': '',
+      '{{ "" | default("d", true) }}': 'd',
+      '{{ 0 | default("d", true) }}': 'd',
+      '{{ u | default("d") }}': 'd',
+      '{{ [{"a": 0}, {"a": 1}] | rejectattr("a") | list | tojson }}':
+          '[{"a": 0}]',
+      '{{ [{"a": 0}, {"a": 1}] | selectattr("a") | list | tojson }}':
+          '[{"a": 1}]',
+    };
+    guards.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render({'x': null}), expected);
+      });
+    });
+  });
 }

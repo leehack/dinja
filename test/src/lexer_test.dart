@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:test/test.dart';
 import 'package:dinja/src/lexer.dart';
 import 'package:dinja/src/template.dart';
@@ -133,6 +135,71 @@ void main() {
         );
       });
     }
+  });
+
+  group('lstrip_blocks after a newline removed by trim_blocks', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    const cases = {
+      '{% if true %}\n    {% set x = 1 %}b{% endif %}': 'b',
+      '{% if true %}\n\t{% if true %}b{% endif %}{% endif %}': 'b',
+      '{% if false %}a{% else %}\n    {% endif %}b': 'b',
+      '{% if false %}a{% elif true %}\n  {% endif %}b': 'b',
+      '{% for i in [1, 2] %}\n    {% if i %}{{ i }}{% endif %}\n{% endfor %}':
+          '12',
+      '{% macro m() %}\n    {% if true %}m{% endif %}\n{% endmacro %}{{ m() }}':
+          'm',
+      '{% macro m() %}[{{ caller() }}]{% endmacro %}'
+              '{% call m() %}\n    {% if true %}c{% endif %}\n{% endcall %}':
+          '[c]',
+      '{% filter upper %}\n    {% if true %}f{% endif %}\n{% endfilter %}': 'F',
+      '{% if true %}\n    {# note #}b{% endif %}': 'b',
+      '{# note #}\n    {% if true %}b{% endif %}': 'b',
+      '{% set x = 1 %}\n    {% set y = 2 %}b': 'b',
+    };
+    cases.forEach((source, expected) {
+      test('strips the indentation in ${jsonEncode(source)}', () {
+        expect(Template(source).render(), expected);
+      });
+    });
+
+    test('strips the indentation before a generation block', () {
+      // llama.cpp 7fe450e1 output; Jinja2 has no generation tag.
+      expect(
+        Template(
+          '{% generation %}\n    {% if true %}g{% endif %}\n{% endgeneration %}',
+        ).render(),
+        'g',
+      );
+    });
+  });
+
+  group('lstrip_blocks', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    const cases = {
+      'a\n    {% if true %}b{% endif %}': 'a\nb',
+      'x: {% if true %}b{% endif %}': 'x: b',
+      '    {% if true %}b{% endif %}': 'b',
+      '{{ "x" }}\n    {% if true %}b{% endif %}': 'x\nb',
+      '{% if true %}\n    {{ "e" }}{% endif %}': '    e',
+      '{% if true %}\n\n    {% set y = 1 %}b{% endif %}': '\nb',
+      '{% if true %} \n    {% set y = 1 %}b{% endif %}': ' \nb',
+      '{% if true %}\n    x    {% set y = 1 %}b{% endif %}': '    x    b',
+      '{% if true %}\n    {%- set y = 1 %}b{% endif %}': 'b',
+      '{% if true -%}\n    {% set y = 1 %}b{% endif %}': 'b',
+      '{% if true %}x\n    {% endif %}': 'x\n',
+    };
+    cases.forEach((source, expected) {
+      test('renders ${jsonEncode(source)} as ${jsonEncode(expected)}', () {
+        expect(Template(source).render(), expected);
+      });
+    });
+
+    test('keeps text at the start of the template', () {
+      // Jinja2 3.1.6 output. llama.cpp 7fe450e1 drops the leading text when it
+      // is one character followed only by whitespace.
+      expect(Template('a{% if true %}b{% endif %}').render(), 'ab');
+      expect(Template('a    {% if true %}b{% endif %}').render(), 'a    b');
+    });
   });
 
   group('Lexer Error Location', () {

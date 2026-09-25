@@ -2,6 +2,8 @@
 import '../types/value.dart';
 import '../types/jinja_string.dart';
 import '../types/repr.dart';
+import 'strftime.dart';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -692,8 +694,9 @@ JinjaValue _default(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
       : const JinjaStringValue(JinjaString([]));
   final boolVal = args.length > 2 ? args[2].asBool : false;
 
-  if (v.isUndefined || (boolVal && !v.asBool)) return defaultVal;
-  return v;
+  // As in llama.cpp, none also takes the default. Jinja2 keeps none.
+  final missing = boolVal ? !v.asBool : v.isUndefined || v.isNone;
+  return missing ? defaultVal : v;
 }
 
 JinjaValue _sort(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -743,6 +746,8 @@ JinjaValue _unique(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
     ];
   } else if (collection is JinjaMap) {
     items = collection.items.keys.toList();
+  } else if (collection.isNone) {
+    return const JinjaList([]);
   } else {
     return collection;
   }
@@ -830,6 +835,7 @@ JinjaValue _map(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _selectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
@@ -862,6 +868,7 @@ JinjaValue _selectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _rejectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
@@ -894,6 +901,7 @@ JinjaValue _rejectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _select(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
@@ -924,6 +932,7 @@ JinjaValue _select(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _reject(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
@@ -1847,15 +1856,18 @@ JinjaValue _strftime_now(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  final format = args.isNotEmpty ? args[0].toString() : '%Y-%m-%d %H:%M:%S';
-  final now = DateTime.now();
-  final result = format
-      .replaceAll('%Y', now.year.toString())
-      .replaceAll('%m', now.month.toString().padLeft(2, '0'))
-      .replaceAll('%d', now.day.toString().padLeft(2, '0'))
-      .replaceAll('%H', now.hour.toString().padLeft(2, '0'))
-      .replaceAll('%M', now.minute.toString().padLeft(2, '0'))
-      .replaceAll('%S', now.second.toString().padLeft(2, '0'));
+  if (args.isEmpty) {
+    throw Exception('strftime_now expects a format string');
+  }
+  final format = args[0];
+  if (format is! JinjaStringValue) {
+    throw Exception('strftime_now expects a string, got ${format.typeName}');
+  }
+  final result = strftime(format.toString(), DateTime.now());
+  // llama.cpp formats into a 100-byte buffer and fails on an empty result.
+  if (result.isEmpty || utf8.encode(result).length >= 100) {
+    throw Exception('strftime_now: failed to format time');
+  }
   return JinjaStringValue(JinjaString.from(result, isSafe: true));
 }
 
