@@ -1,3 +1,8 @@
+## Unreleased
+
+- Fixed string equality to compare content only: `''.strip() == ''` is now true, and `safe` or input-marked strings equal plain ones.
+- Removed a debug `print` to stdout when a `for` loop iterates a function; the error now names the function.
+
 ## 1.0.0
 
 - Initial release of Dinja.
