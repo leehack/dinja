@@ -422,8 +422,8 @@ void _bindParameters(
   final names = [
     for (final param in params)
       switch (param) {
-        Identifier(:final name) => name,
-        KeywordArgumentExpression(key: Identifier(:final name)) => name,
+        Identifier(name: final param) => param,
+        KeywordArgumentExpression(key: Identifier(name: final param)) => param,
         _ => throw Exception("Invalid parameter in '$name'"),
       },
   ];
