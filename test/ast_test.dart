@@ -22,6 +22,7 @@ const _template = '''
 const _exportedTypes = <Type>[
   ArrayLiteral,
   BinaryExpression,
+  BlankExpression,
   BreakStatement,
   CallExpression,
   CallStatement,
@@ -91,7 +92,7 @@ void main() {
         for (final Type type in _exportedTypes) '$type',
         'parseTemplate',
       };
-      expect(census, hasLength(35));
+      expect(census, hasLength(36));
       expect(_exportedFunction('{{ x }}'), isA<Program>());
       expect(
         _showClauseNames(File('lib/ast.dart').readAsStringSync()),

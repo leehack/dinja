@@ -475,7 +475,9 @@ JinjaValue _last(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _min(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaUndefined();
   final collection = args[0];
-  final attribute = kwargs['attribute']?.toString();
+  final attribute =
+      kwargs['attribute']?.toString() ??
+      (args.length > 2 ? args[2].toString() : null);
 
   if ((collection is JinjaList || collection is JinjaTuple)) {
     final items = collection is JinjaList
@@ -495,7 +497,7 @@ JinjaValue _min(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
         mVal = itemVal;
       }
     }
-    return attribute != null ? mVal : m;
+    return m;
   }
   return collection;
 }
@@ -503,7 +505,9 @@ JinjaValue _min(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _max(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaUndefined();
   final collection = args[0];
-  final attribute = kwargs['attribute']?.toString();
+  final attribute =
+      kwargs['attribute']?.toString() ??
+      (args.length > 2 ? args[2].toString() : null);
 
   if ((collection is JinjaList || collection is JinjaTuple)) {
     final items = collection is JinjaList
@@ -523,7 +527,7 @@ JinjaValue _max(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
         mVal = itemVal;
       }
     }
-    return attribute != null ? mVal : m;
+    return m;
   }
   return collection;
 }
@@ -1450,6 +1454,8 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
               .join(' '),
         );
       });
+    case 'format':
+      return JinjaFunction('format', (args, kwargs) => _format(obj, args));
     case 'replace':
       return JinjaFunction('replace', (args, kwargs) {
         if (args.length < 2) return obj;
@@ -1477,6 +1483,44 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
       });
   }
   return null;
+}
+
+JinjaStringValue _format(JinjaStringValue fmt, List<JinjaValue> args) {
+  final literalIsInput = fmt.value.allPartsAreInput;
+  final source = fmt.value.toString();
+  final parts = <JinjaStringPart>[];
+  final literal = StringBuffer();
+  void flushLiteral() {
+    if (literal.isEmpty) return;
+    parts.add(JinjaStringPart(literal.toString(), literalIsInput));
+    literal.clear();
+  }
+
+  var next = 0;
+  for (var i = 0; i < source.length; i++) {
+    if (source[i] != '{') {
+      literal.write(source[i]);
+      continue;
+    }
+    if (i + 1 >= source.length || source[i + 1] != '}') {
+      throw Exception("format() only supports simple '{}' placeholders");
+    }
+    i++;
+    if (next >= args.length) {
+      throw Exception(
+        'format() expected at least ${next + 1} arguments, got ${args.length}',
+      );
+    }
+    flushLiteral();
+    final arg = args[next++];
+    parts.addAll(
+      arg is JinjaStringValue
+          ? arg.value.parts
+          : [JinjaStringPart('$arg', false)],
+    );
+  }
+  flushLiteral();
+  return JinjaStringValue(JinjaString(parts));
 }
 
 JinjaValue _strip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -1665,7 +1709,7 @@ JinjaValue _lower(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _indent(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
   final str = args[0].toString();
-  final width = args.length > 1 ? args[1].asInt : (kwargs['width']?.asInt ?? 4);
+  final width = args.length > 1 ? args[1] : kwargs['width'];
   final first = args.length > 2
       ? args[2].asBool
       : (kwargs['first']?.asBool ?? false);
@@ -1673,7 +1717,9 @@ JinjaValue _indent(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
       ? args[3].asBool
       : (kwargs['blank']?.asBool ?? false);
 
-  final indentStr = ' ' * width;
+  final indentStr = width is JinjaStringValue
+      ? width.toString()
+      : ' ' * (width?.asInt ?? 4);
   final lines = str.split('\n');
   final buffer = StringBuffer();
 

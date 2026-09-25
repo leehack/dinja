@@ -70,12 +70,12 @@ void main() {
         equals('35'),
       );
       expect(
-        Template("{{ items | max(attribute='age') }}").render(data),
-        equals('40'),
+        Template("{{ (items | max(attribute='age')).price }}").render(data),
+        equals('5'),
       );
       expect(
-        Template("{{ items | min(attribute='price') }}").render(data),
-        equals('5'),
+        Template("{{ (items | min(attribute='price')).age }}").render(data),
+        equals('40'),
       );
     });
 
@@ -321,16 +321,13 @@ void main() {
           {'v': 15},
         ],
       };
-      // min/max return the item that has the min/max attribute, UNLESS it's just value comparison?
-      // Checking builtins.dart: "return attribute != null ? mVal : m;"
-      // Wait, if attribute is present, it returns mVal (the attribute value).
       expect(
         Template("{{ items|min(attribute='v') }}").render(data),
-        equals("5"),
+        equals("{'v': 5}"),
       );
       expect(
         Template("{{ items|max(attribute='v') }}").render(data),
-        equals("15"),
+        equals("{'v': 15}"),
       );
     });
 

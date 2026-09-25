@@ -27,6 +27,7 @@ export 'src/ast/nodes.dart'
     show
         ArrayLiteral,
         BinaryExpression,
+        BlankExpression,
         BreakStatement,
         CallExpression,
         CallStatement,
