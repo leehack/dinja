@@ -694,8 +694,9 @@ JinjaValue _default(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
       : const JinjaStringValue(JinjaString([]));
   final boolVal = args.length > 2 ? args[2].asBool : false;
 
-  if (v.isUndefined || (boolVal && !v.asBool)) return defaultVal;
-  return v;
+  // As in llama.cpp, none also takes the default. Jinja2 keeps none.
+  final missing = boolVal ? !v.asBool : v.isUndefined || v.isNone;
+  return missing ? defaultVal : v;
 }
 
 JinjaValue _sort(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -745,6 +746,8 @@ JinjaValue _unique(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
     ];
   } else if (collection is JinjaMap) {
     items = collection.items.keys.toList();
+  } else if (collection.isNone) {
+    return const JinjaList([]);
   } else {
     return collection;
   }
@@ -832,6 +835,7 @@ JinjaValue _map(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _selectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
@@ -864,6 +868,7 @@ JinjaValue _selectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _rejectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
@@ -896,6 +901,7 @@ JinjaValue _rejectattr(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _select(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList
@@ -926,6 +932,7 @@ JinjaValue _select(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _reject(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
+  if (collection.isNone) return const JinjaList([]);
   if (collection is! JinjaList && collection is! JinjaTuple) return collection;
 
   final items = collection is JinjaList

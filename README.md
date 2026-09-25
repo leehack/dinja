@@ -84,7 +84,7 @@ Real templates come from the `chat_template` field of a model's `tokenizer_confi
 ## Why dinja
 
 - **llama.cpp parity.** dinja follows `common/jinja`, the engine llama-server renders chat templates with. llama.cpp's Jinja test suite, 290 cases whose expected output also matches Python Jinja2 3.1.6, is ported case for case: dinja matches all 279 cases that llama.cpp runs byte for byte. The other 11 are cases llama.cpp skips as not implemented.
-- **Real templates.** The tests parse and render 45 distinct chat templates from real models, including Llama 3.x, Qwen2.5, Qwen3, Mistral, Gemma, DeepSeek R1, Phi, gpt-oss, Kimi K2 and GLM.
+- **Real templates.** The tests parse and render 45 distinct chat templates from real models, including Llama 3.x, Qwen2.5, Qwen3, Mistral, Gemma, DeepSeek R1, Phi, gpt-oss, Kimi K2 and GLM. With these and the templates in llama.cpp's `models/templates`, 86 distinct in all, dinja gives the same output as llama.cpp 7fe450e1 byte for byte, or raises the same template error, in four conversations: system prompt with tools, user only, multi-turn, and a tool call with its result.
 - **Input marking.** Values wrapped in `JinjaString.user` are escaped on output, and `renderJinjaResult` reports which parts of the output came from input.
 - **Web and Wasm.** Pure Dart, depending only on `meta`. The parser, runtime and llama.cpp tests also pass in Chrome, compiled to JavaScript and to Wasm.
 - **Used by [llamadart](https://pub.dev/packages/llamadart)**, a llama.cpp runtime for Dart and Flutter, to render chat templates.
@@ -145,3 +145,4 @@ dinja implements the Jinja that chat templates use, not all of Jinja2:
 - A template is a single string: `extends`, `block`, `include`, `import`, `raw` and `with` throw a `ParserException`.
 - Plain strings are never escaped; only `JinjaString.user` values are.
 - Some Jinja2 features llama.cpp lacks are missing here too; for example, `'%s'|format(x)` returns `%s`.
+- `strftime_now` formats the system clock's current time in the local time zone, as C `strftime` does in llama.cpp.
