@@ -715,7 +715,8 @@ class Parser {
   }
 
   Expression parsePrimaryExpression() {
-    final t = tokens[current++];
+    final t = peek();
+    current++;
     final startPos = t.pos;
 
     switch (t.type) {
@@ -756,6 +757,14 @@ class Parser {
         }
         current++;
         return ObjectLiteral(startPos, pairs);
+      case TokenType.eof:
+        throw ParserException(
+          'Unexpected end of template',
+          source,
+          startPos,
+          t.line,
+          t.col,
+        );
       default:
         throw ParserException(
           'Unexpected token: ${t.value}',

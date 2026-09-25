@@ -145,11 +145,35 @@ void main() {
               "| unique(attribute='n') | map(attribute='n') | join(',') }}",
           'a,1,1',
         ),
+        ("{{ ['a', 'A', 'b'] | unique(true) | join('') }}", 'aAb'),
+        ("{{ ['a', 'A', 'b'] | unique(false) | join('') }}", 'ab'),
+        (
+          "{{ [{'n': 'a'}, {'n': 'A'}] | unique(true, 'n') "
+              "| map(attribute='n') | join(',') }}",
+          'a,A',
+        ),
+        ("{{ 'abca' | unique | join(',') }}", 'a,b,c'),
+        ("{{ 'abcA' | unique | join('') }}", 'abc'),
+        ("{{ 'abcAa' | unique(true) | join('') }}", 'abcA'),
+        ("{{ {'a': 1, 'A': 2, 'b': 3} | unique | join(',') }}", 'a,b'),
+        ("{{ {'a': 1, 'A': 2, 'b': 3} | unique(true) | join(',') }}", 'a,A,b'),
+        (
+          "{{ {1: 'x', '1': 'y', 'a': 2, 'A': 3} | unique | list | length }}",
+          '3',
+        ),
       ]) {
         test(source, () {
           expect(Template(source).render(), expected);
         });
       }
+    });
+
+    test('unique keeps input marking on string characters', () {
+      final result = Template(
+        '{{ s | unique | first }}',
+      ).renderJinjaResult({'s': JinjaString.user('aAb')});
+      expect(result.toString(), 'a');
+      expect(result.parts.every((p) => p.isInput), isTrue);
     });
 
     test('replace filter', () {

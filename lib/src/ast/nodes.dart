@@ -931,15 +931,7 @@ class BinaryExpression extends Expression {
 
     switch (op.value) {
       case '+':
-        if (l.isString || r.isString) {
-          JinjaString lStr = l is JinjaStringValue
-              ? l.value
-              : JinjaString.template(l.toString());
-          JinjaString rStr = r is JinjaStringValue
-              ? r.value
-              : JinjaString.template(r.toString());
-          return JinjaStringValue(lStr + rStr);
-        }
+        if (l.isString || r.isString) return _concat(l, r);
         if (l.isNumeric && r.isNumeric) {
           if (l is JinjaFloat || r is JinjaFloat) {
             return JinjaFloat(l.asDouble + r.asDouble);
@@ -968,8 +960,12 @@ class BinaryExpression extends Expression {
           return JinjaInteger(l.asInt * r.asInt);
         }
         // String repeat? `~` is concat. `*` is repeat in Python.
-        if (l.isString && r.isNumeric) {
-          return JinjaStringValue.fromString(l.toString() * r.asInt);
+        if (l is JinjaStringValue && r.isNumeric) {
+          return JinjaStringValue(
+            JinjaString([
+              for (var i = 0; i < r.asInt; i++) ...l.value.parts,
+            ], isSafe: l.isSafe),
+          );
         }
         throw Exception('Invalid operand types for *');
       case '/':
@@ -1011,7 +1007,7 @@ class BinaryExpression extends Expression {
       case '>=':
         return JinjaBoolean(_compare(l, r) >= 0);
       case '~': // concat
-        return JinjaStringValue.fromString(l.toString() + r.toString());
+        return _concat(l, r);
       case 'in':
         // r must be container
         if (r is JinjaList) {
@@ -1192,6 +1188,16 @@ class TestExpression extends Expression {
 
     throw Exception('Unknown test: $testName');
   }
+}
+
+JinjaStringValue _concat(JinjaValue l, JinjaValue r) {
+  var left = l is JinjaStringValue ? l.value : JinjaString.template('$l');
+  var right = r is JinjaStringValue ? r.value : JinjaString.template('$r');
+  if (left.isSafe != right.isSafe) {
+    left = left.escape();
+    right = right.escape();
+  }
+  return JinjaStringValue(left + right);
 }
 
 /// Represents a selection expression used in filtering iterations.
