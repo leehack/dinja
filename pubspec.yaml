@@ -1,6 +1,6 @@
 name: dinja
 description: "Jinja engine for Hugging Face and GGUF LLM chat templates: messages, tools, generation prompts. Parity-tested against llama.cpp and Jinja2. All platforms, including web and Wasm."
-version: 1.1.1
+version: 1.2.0
 repository: https://github.com/leehack/dinja
 issue_tracker: https://github.com/leehack/dinja/issues
 topics:
