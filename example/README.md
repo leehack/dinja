@@ -1,27 +1,75 @@
-# Dinja Examples
+# dinja examples
 
-This directory contains examples of how to use the `dinja` package.
+## Render a chat template
 
-## Basic Usage
+[`chat_template_example.dart`](chat_template_example.dart) renders a trimmed Qwen2.5-style chat template with a system message, a user turn, a tool definition and `add_generation_prompt`.
 
-See `example.dart` for a minimal "Hello World" example.
+```dart
+import 'package:dinja/dinja.dart';
 
-```bash
-dart example/example.dart
+// A trimmed Qwen2.5-style ChatML template.
+const chatTemplate = r'''
+{%- if tools %}
+    {{- '<|im_start|>system\n' + messages[0].content + '\n\n# Tools\n\n<tools>' }}
+    {%- for tool in tools %}
+        {{- '\n' + tool | tojson }}
+    {%- endfor %}
+    {{- '\n</tools><|im_end|>\n' }}
+{%- else %}
+    {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
+{%- endif %}
+{%- for message in messages[1:] %}
+    {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+{%- endif %}
+''';
+
+void main() {
+  final prompt = Template(chatTemplate).render({
+    'messages': [
+      {'role': 'system', 'content': 'You are a helpful assistant.'},
+      {'role': 'user', 'content': 'What is the weather in Paris?'},
+    ],
+    'tools': [
+      {
+        'type': 'function',
+        'function': {
+          'name': 'get_weather',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'city': {'type': 'string'},
+            },
+          },
+        },
+      },
+    ],
+    'add_generation_prompt': true,
+  });
+  print(prompt);
+}
 ```
 
-## Chat Templates
+`dart run example/chat_template_example.dart` prints the prompt:
 
-`chat_template_example.dart` demonstrates how to render a complex chat template (like those used for Llama 3 or Mistral) with logic, loops, and special tokens.
+```text
+<|im_start|>system
+You are a helpful assistant.
 
-```bash
-dart example/chat_template_example.dart
+# Tools
+
+<tools>
+{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}
+</tools><|im_end|>
+<|im_start|>user
+What is the weather in Paris?<|im_end|>
+<|im_start|>assistant
+
 ```
 
-## Security & Escaping
+## More examples
 
-`security_example.dart` shows that plain strings are not escaped, that values wrapped in `JinjaString.user` are, and how to mark user input as safe.
-
-```bash
-dart example/security_example.dart
-```
+- [`example.dart`](example.dart): the smallest render. `dart run example/example.dart` prints `Hello World!`.
+- [`security_example.dart`](security_example.dart): a plain string is not escaped, a `JinjaString.user` value is, and `markSafe()` turns escaping off. Run it with `dart run example/security_example.dart`.

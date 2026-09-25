@@ -1,21 +1,19 @@
 name: dinja
-description: A minimal, zero-dependency Jinja templating engine for Dart, ported from llama.cpp. Focused on security and efficiency.
+description: "Jinja engine for Hugging Face and GGUF LLM chat templates: messages, tools, generation prompts. Parity-tested against llama.cpp and Jinja2. All platforms, including web and Wasm."
 version: 1.1.1
 repository: https://github.com/leehack/dinja
 issue_tracker: https://github.com/leehack/dinja/issues
 topics:
-  - jinja2
+  - jinja
   - template
   - llm
-  - security
   - chat-templates
+  - huggingface
 
 environment:
   sdk: ^3.10.7
 
-# Add regular dependencies here.
 dependencies:
-  # path: ^1.9.0
   meta: ^1.10.0
 
 dev_dependencies:
