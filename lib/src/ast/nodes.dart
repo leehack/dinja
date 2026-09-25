@@ -178,12 +178,10 @@ class ForStatement extends Statement {
     }
 
     if (!iterableVal.isList && !iterableVal.isMap && !iterableVal.isString) {
-      if (iterableVal is JinjaFunction) {
-        print('DEBUG: For loop on Function: ${iterableVal.name}');
-      }
-      throw Exception(
-        'Expected iterable in for loop: got ${iterableVal.typeName}',
-      );
+      final got = iterableVal is JinjaFunction
+          ? "${iterableVal.typeName} '${iterableVal.name}'"
+          : iterableVal.typeName;
+      throw Exception('Expected iterable in for loop: got $got');
     }
 
     List<JinjaValue> items = [];
