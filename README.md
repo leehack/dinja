@@ -41,7 +41,7 @@ Add `dinja` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  dinja: ^1.0.0
+  dinja: ^1.1.0
 ```
 
 ## Usage
@@ -101,6 +101,21 @@ void main() {
 
   print(output);
   // Output: <s>[INST] Hello! [/INST][INST] What is the capital of France? [/INST]
+}
+```
+
+### Analyzing Templates
+
+`package:dinja/ast.dart` parses a template into an AST without rendering it, for tools that inspect templates (for example, to detect which features a chat template uses).
+
+```dart
+import 'package:dinja/ast.dart';
+
+void main() {
+  final program = parseTemplate('{% if tools %}{{ tools | length }}{% endif %}');
+  for (final statement in program.body) {
+    print(statement.type); // If
+  }
 }
 ```
 
