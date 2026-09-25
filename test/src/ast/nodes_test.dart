@@ -121,6 +121,197 @@ void main() {
     });
   });
 
+  group('Macro argument binding', () {
+    const greet =
+        "{% macro greet(first, last, greeting='Hello') %}"
+        '{{ greeting }}, {{ first }} {{ last }}{% endmacro %}';
+    const add = '{% macro add(a, b, c=0) %}{{ a + b + c }}{% endmacro %}';
+    const pair = '{% macro f(a, b=2) %}[{{ a }}|{{ b }}]{% endmacro %}';
+
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (source, expected) in [
+      (
+        "$greet{{ greet(last='Smith', first='John') }},"
+            "{{ greet(last='Doe', greeting='Hi', first='Jane') }}",
+        'Hello, John Smith,Hi, Jane Doe',
+      ),
+      (
+        '$add{{ add(1, 2) }},{{ add(1, 2, 3) }},{{ add(1, b=10) }},'
+            '{{ add(1, 2, c=5) }}',
+        '3,6,11,8',
+      ),
+      ('$add{{ add(c=1, b=2, a=3) }}', '6'),
+      ('$pair{{ f(b=5, a=1) }}', '[1|5]'),
+      (
+        "{% macro f(a, b='d') %}<{{ a }}{{ b }}:{{ caller() }}>{% endmacro %}"
+            "{% call f(b='B', a='A') %}body{% endcall %}",
+        '<AB:body>',
+      ),
+      (
+        "{% macro f(a) %}<{{ caller(q='Q', p='P') }}>{% endmacro %}"
+            '{% call(p, q) f(1) %}{{ p }}{{ q }}{% endcall %}',
+        '<PQ>',
+      ),
+      (
+        '{% macro f(a) %}<{{ caller() }}>{% endmacro %}'
+            "{% call(p='dp') f(1) %}{{ p }}{% endcall %}",
+        '<dp>',
+      ),
+    ]) {
+      test(source, () {
+        expect(Template(source).render(), expected);
+      });
+    }
+
+    // Jinja2 3.1.6 gives this output; llama.cpp 7fe450e1 drops `c=3` and
+    // prints `10`.
+    test('unchanged: a keyword after an unfilled parameter', () {
+      expect(
+        Template(
+          '{% macro g(a, b, c=0) %}{{ a }}{{ c }}{% endmacro %}{{ g(1, c=3) }}',
+        ).render(),
+        '13',
+      );
+    });
+
+    for (final (source, expected) in [
+      ('$pair{{ f(1, 2, 3) }}', '[1|2]'),
+      ('$pair{{ f(nope) }}', '[|2]'),
+      (
+        '{% macro f(a) %}<{{ a }}:{{ caller() }}>{% endmacro %}'
+            '{% call f(1) %}body{% endcall %}',
+        '<1:body>',
+      ),
+      (
+        "{% macro f(a) %}<{{ caller(a, 'x') }}>{% endmacro %}"
+            '{% call(p, q) f(1) %}{{ p }}{{ q }}{% endcall %}',
+        '<1x>',
+      ),
+    ]) {
+      test('unchanged: $source', () {
+        expect(Template(source).render(), expected);
+      });
+    }
+
+    for (final (source, message) in [
+      ('$pair{{ f() }}', "Not enough arguments provided to 'f'"),
+      ('$add{{ add(1) }}', "Not enough arguments provided to 'add'"),
+      (
+        '{% macro f(a) %}<{{ caller() }}>{% endmacro %}'
+            '{% call(p) f(1) %}{{ p }}{% endcall %}',
+        "Not enough arguments provided to 'caller'",
+      ),
+      (
+        '{% macro f(a) %}{{ caller() }}{% endmacro %}'
+            '{% call f() %}x{% endcall %}',
+        "Not enough arguments provided to 'f'",
+      ),
+      ('$pair{{ f(1, z=3) }}', "macro 'f' takes no keyword argument 'z'"),
+      (
+        '$pair{{ f(1, a=2) }}',
+        "macro 'f' got multiple values for argument 'a'",
+      ),
+      (
+        '$pair{{ f(1, 2, b=3) }}',
+        "macro 'f' got multiple values for argument 'b'",
+      ),
+    ]) {
+      test('throws: $source', () {
+        expect(
+          () => Template(source).render(),
+          throwsA(predicate((Object e) => '$e'.contains(message))),
+        );
+      });
+    }
+  });
+
+  group('Argument unpacking', () {
+    // llama.cpp 7fe450e1 throws for each of these; Jinja2 3.1.6 unpacks.
+    for (final source in [
+      '{% macro f(a, b, c) %}{{ a }}{% endmacro %}{{ f(*[1, 2, 3]) }}',
+      '{% macro f(a, b, c) %}{{ a }}{% endmacro %}{{ f(*[1, 2], c=3) }}',
+      '{{ range(*[1, 4])|list }}',
+      "{{ 'a-b'.split(*['-']) }}",
+      "{{ [1, 2]|join(*[', ']) }}",
+    ]) {
+      test('throws: $source', () {
+        expect(
+          () => Template(source).render(),
+          throwsA(
+            predicate(
+              (Object e) =>
+                  '$e'.contains('Argument unpacking with * is not supported'),
+            ),
+          ),
+        );
+      });
+    }
+  });
+
+  group('Numeric member access', () {
+    final data = <String, dynamic>{
+      'user': 'abcdefghijk'.split(''),
+      'd': {'10': 'string key'},
+      's': 'hello',
+    };
+
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (source, expected) in [
+      ("{{ {10: 'Bob'}.10 }}", 'Bob'),
+      ('{{ user.10 }}', 'k'),
+      ('{{ user.0 }}', 'a'),
+      ('[{{ user.99 }}]', '[]'),
+      ("{{ user.99|default('z') }}", 'z'),
+      ('{{ user.1|upper }}', 'B'),
+      ('[{{ d.10 }}]', '[]'),
+      ('{{ s.1 }}', 'e'),
+      ('{{ (1, 2).1 }}', '2'),
+    ]) {
+      test(source, () {
+        expect(Template(source).render(data), expected);
+      });
+    }
+
+    test('rejects a negative index', () {
+      expect(
+        () => Template('{{ user.-1 }}').render(data),
+        throwsA(
+          predicate(
+            (Object e) =>
+                '$e'.contains('Static member property cannot be negative'),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('Integer times string', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (source, expected) in [
+      ("{{ 3 * 'ab' }}", 'ababab'),
+      ('{{ n * s }}', 'hihihi'),
+      ("[{{ 0 * 'ab' }}]", '[]'),
+      ("[{{ -1 * 'ab' }}]", '[]'),
+    ]) {
+      test(source, () {
+        expect(Template(source).render({'n': 3, 's': 'hi'}), expected);
+      });
+    }
+
+    test('keeps input marking', () {
+      expect(
+        Template('{{ 2 * s }}').render({'s': JinjaString.user('<b>')}),
+        '&lt;b&gt;&lt;b&gt;',
+      );
+    });
+
+    for (final source in ["{{ 2.0 * 'ab' }}", "{{ 'a' * 'b' }}"]) {
+      test('still throws: $source', () {
+        expect(() => Template(source).render(), throwsA(isA<Exception>()));
+      });
+    }
+  });
+
   group('Nodes Coverage', () {
     test('ForStatement iteration variants', () {
       // String iteration

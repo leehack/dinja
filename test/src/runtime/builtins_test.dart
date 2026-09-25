@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:test/test.dart';
 import 'package:dinja/dinja.dart';
 
@@ -70,12 +72,12 @@ void main() {
         equals('35'),
       );
       expect(
-        Template("{{ items | max(attribute='age') }}").render(data),
-        equals('40'),
+        Template("{{ (items | max(attribute='age')).price }}").render(data),
+        equals('5'),
       );
       expect(
-        Template("{{ items | min(attribute='price') }}").render(data),
-        equals('5'),
+        Template("{{ (items | min(attribute='price')).age }}").render(data),
+        equals('40'),
       );
     });
 
@@ -321,16 +323,13 @@ void main() {
           {'v': 15},
         ],
       };
-      // min/max return the item that has the min/max attribute, UNLESS it's just value comparison?
-      // Checking builtins.dart: "return attribute != null ? mVal : m;"
-      // Wait, if attribute is present, it returns mVal (the attribute value).
       expect(
         Template("{{ items|min(attribute='v') }}").render(data),
-        equals("5"),
+        equals("{'v': 5}"),
       );
       expect(
         Template("{{ items|max(attribute='v') }}").render(data),
-        equals("15"),
+        equals("{'v': 15}"),
       );
     });
 
@@ -947,5 +946,296 @@ void main() {
         identical(0, 0.0) ? '1234567|1234567' : '1.23457e+06|1234567.0',
       );
     });
+  });
+
+  group('min and max with attribute return the item', () {
+    final data = <String, dynamic>{
+      'items': [
+        {'x': 2, 'n': 'b'},
+        {'x': 1, 'n': 'A'},
+        {'x': 3, 'n': 'c'},
+      ],
+      'pairs': [
+        [2, 'x'],
+        [1, 'y'],
+      ],
+      'keyed': [
+        {'n': 'b', 'x': 1},
+        {'n': 'a', 'x': 2},
+      ],
+    };
+
+    // Jinja2 3.1.6 gives each of these outputs; llama.cpp 7fe450e1 throws
+    // not-implemented for `attribute`.
+    for (final (source, expected) in [
+      ("{{ items|min(attribute='x') }}", "{'x': 1, 'n': 'A'}"),
+      ("{{ items|max(attribute='x') }}", "{'x': 3, 'n': 'c'}"),
+      ("{{ (items|min(attribute='x')).n }}", 'A'),
+      ("{{ (items|max(attribute='n')).x }}", '3'),
+      ("{{ items|min(attribute='x')|tojson }}", '{"x": 1, "n": "A"}'),
+      ("{{ keyed|min(false, 'x') }}", "{'n': 'b', 'x': 1}"),
+      ('{{ pairs|min(attribute=0) }}', "[1, 'y']"),
+      (
+        "{{ [{'x': 1, 'i': 'first'}, {'x': 1, 'i': 'second'}]"
+            "|min(attribute='x') }}",
+        "{'x': 1, 'i': 'first'}",
+      ),
+      (
+        "{{ [{'x': 1, 'i': 'first'}, {'x': 1, 'i': 'second'}]"
+            "|max(attribute='x') }}",
+        "{'x': 1, 'i': 'first'}",
+      ),
+      (
+        "{{ [{'p': {'q': 2}}, {'p': {'q': 1}}]|min(attribute='p.q') }}",
+        "{'p': {'q': 1}}",
+      ),
+    ]) {
+      test(source, () {
+        expect(Template(source).render(data), expected);
+      });
+    }
+
+    test('unchanged without attribute or with an empty list', () {
+      expect(Template('{{ [3, 1, 2]|min }}').render(), '1');
+      expect(Template('{{ [3, 1, 2]|max }}').render(), '3');
+      expect(Template("[{{ []|min(attribute='x') }}]").render(), '[]');
+    });
+  });
+
+  group('indent with a string width', () {
+    final data = <String, dynamic>{'data': 'foo\nbar'};
+
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (source, expected) in [
+      ("{{ data|indent(width='>>>>') }}", 'foo\n>>>>bar'),
+      ("{{ data|indent('> ') }}", 'foo\n> bar'),
+      ("{{ data|indent('> ', true) }}", '> foo\n> bar'),
+      ("{{ 'a\n\nb'|indent('-', blank=true) }}", 'a\n-\n-b'),
+      ("{{ data|indent('') }}", 'foo\nbar'),
+    ]) {
+      test(source, () {
+        expect(Template(source).render(data), expected);
+      });
+    }
+
+    test('integer and default widths are unchanged', () {
+      expect(Template('{{ data|indent(2) }}').render(data), 'foo\n  bar');
+      expect(Template('{{ data|indent }}').render(data), 'foo\n    bar');
+    });
+  });
+
+  group('str.format', () {
+    final data = <String, dynamic>{'s': 'hello', 'n': 3};
+
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (source, expected) in [
+      ("{{ '<{}|{}>'.format(s, 42) }}", '<hello|42>'),
+      ("{{ 'plain'.format() }}", 'plain'),
+      (
+        "{{ '{}|{}|{}|{}|{}'.format(1.5, true, none, [1, 'a'], {'k': 1}) }}",
+        "1.5|True|None|[1, 'a']|{'k': 1}",
+      ),
+      ("{% set f = '[{}]' %}{{ f.format(n) }}", '[3]'),
+      ("{{ '{}'.format(1, 2) }}", '1'),
+      ("{{ '{}'.format(1, x=2) }}", '1'),
+    ]) {
+      test(source, () {
+        expect(Template(source).render(data), expected);
+      });
+    }
+
+    test('keeps input marking of arguments and the format string', () {
+      final user = JinjaString.user('<b>');
+      expect(
+        Template("{{ '<{}>'.format(s) }}").render({'s': user}),
+        '<&lt;b&gt;>',
+      );
+      expect(Template('{{ s.format(1) }}').render({'s': user}), '&lt;b&gt;');
+      expect(
+        Template('{{ f.format(1) }}').render({'f': JinjaString.user('<{}>')}),
+        '&lt;1&gt;',
+      );
+    });
+
+    test('keeps a lone closing brace, as llama.cpp does', () {
+      expect(Template("{{ 'a}b'.format() }}").render(), 'a}b');
+    });
+
+    test('throws when an argument is missing', () {
+      expect(
+        () => Template("{{ '{} {}'.format(1) }}").render(),
+        throwsA(
+          predicate(
+            (Object e) =>
+                '$e'.contains('format() expected at least 2 arguments, got 1'),
+          ),
+        ),
+      );
+    });
+
+    // llama.cpp 7fe450e1 throws not-implemented for these forms.
+    for (final source in [
+      "{{ '{1}-{0}-{1}'.format('a', 'b') }}",
+      "{{ '{name} is {age}'.format(name='Bob', age=7) }}",
+      "{{ '{{}} {} {{x}}'.format('mid') }}",
+      "{{ '{:>5}'.format(1) }}",
+      "{{ 'a{'.format() }}",
+    ]) {
+      test('throws: $source', () {
+        expect(
+          () => Template(source).render(),
+          throwsA(
+            predicate(
+              (Object e) => '$e'.contains(
+                "format() only supports simple '{}' placeholders",
+              ),
+            ),
+          ),
+        );
+      });
+    }
+  });
+
+  group('indent line handling', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (input, args, expected) in [
+      ('foo\n', '', 'foo\n'),
+      ('foo\n', '(2, true)', '  foo\n'),
+      ('foo\n\n', '', 'foo\n\n'),
+      ('foo\nbar\n', '', 'foo\n    bar\n'),
+      ('a\n\nb\n', '(2)', 'a\n\n  b\n'),
+      ('\n', '', '\n'),
+      ('\n', '(2, true)', '  \n'),
+      ('', '', ''),
+      ('\nfoo', '(2, true)', '  \n  foo'),
+    ]) {
+      test('${jsonEncode(input)}|indent$args', () {
+        expect(Template('{{ s|indent$args }}').render({'s': input}), expected);
+      });
+    }
+
+    // llama.cpp 7fe450e1 gives an empty string; Jinja2 3.1.6 gives '  '.
+    test("''|indent(2, true) follows llama.cpp", () {
+      expect(Template('{{ s|indent(2, true) }}').render({'s': ''}), '');
+    });
+
+    // Jinja2 3.1.6 gives these; llama.cpp 7fe450e1 drops the leading empty
+    // lines.
+    for (final (input, args, expected) in [
+      ('\nfoo', '', '\n    foo'),
+      ('\n\nfoo', '(2, false, true)', '\n  \n  foo'),
+    ]) {
+      test('unchanged: ${jsonEncode(input)}|indent$args', () {
+        expect(Template('{{ s|indent$args }}').render({'s': input}), expected);
+      });
+    }
+
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (input, args, expected) in [
+      ('\n', '(2, false, true)', '\n  '),
+      ('foo\n', '(2, false, true)', 'foo\n  '),
+    ]) {
+      test('unchanged: ${jsonEncode(input)}|indent$args', () {
+        expect(Template('{{ s|indent$args }}').render({'s': input}), expected);
+      });
+    }
+
+    for (final (input, expected) in [
+      ('foo', 'foo'),
+      ('foo\r\nbar', 'foo\r\n    bar'),
+      ('  \nfoo', '  \n    foo'),
+    ]) {
+      test('unchanged: ${jsonEncode(input)}|indent', () {
+        expect(Template('{{ s|indent }}').render({'s': input}), expected);
+      });
+    }
+  });
+
+  group('Tests that take an argument', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 both throw for each of these.
+    for (final source in [
+      '{{ a is divisibleby }}',
+      '{{ a is eq }}',
+      '{{ a is equalto }}',
+      '{{ a is ne }}',
+      '{{ a is gt }}',
+      '{{ a is greaterthan }}',
+      '{{ a is ge }}',
+      '{{ a is lt }}',
+      '{{ a is lessthan }}',
+      '{{ a is in }}',
+      '{{ a is divisibleby -a }}',
+      '{{ -2 is eq -a }}',
+      "{{ [1, 2]|select('eq')|list }}",
+    ]) {
+      test('throw without one: $source', () {
+        expect(
+          () => Template(source).render({'a': 2}),
+          throwsA(
+            predicate((Object e) => '$e'.contains('Test expected 2 arguments')),
+          ),
+        );
+      });
+    }
+
+    for (final source in [
+      '{{ a is le }}',
+      '{{ a is sameas }}',
+      '{{ a is startingwith }}',
+      '{{ a is endingwith }}',
+      '{{ a is ieq }}',
+    ]) {
+      test('throw without one: $source', () {
+        expect(
+          () => Template(source).render({'a': 2}),
+          throwsA(
+            predicate((Object e) => '$e'.contains('Test expected 2 arguments')),
+          ),
+        );
+      });
+    }
+
+    for (final (source, expected) in [
+      ('{{ a is divisibleby(-a) }}', 'True'),
+      ('{{ -2 is eq(-a) }}', 'True'),
+      ('{{ a is divisibleby 2 }}', 'True'),
+      ("{{ [1, 2]|select('eq', 2)|join(',') }}", '2'),
+    ]) {
+      test('unchanged: $source', () {
+        expect(Template(source).render({'a': 2}), expected);
+      });
+    }
+  });
+
+  group('format filter', () {
+    // llama.cpp 7fe450e1 gives each of these outputs; the filter reaches its
+    // `{}`-only string format method.
+    for (final (source, expected) in [
+      ("{{ '{}-{}'|format(1, 2) }}", '1-2'),
+      ("{{ '%s-%s'|format(1, 2) }}", '%s-%s'),
+      ("{{ 'plain'|format }}", 'plain'),
+      ("{{ '%(x)s'|format(x=1) }}", '%(x)s'),
+    ]) {
+      test(source, () {
+        expect(Template(source).render(), expected);
+      });
+    }
+
+    for (final (source, message) in [
+      ('{{ a|format }}', "Unknown filter 'format' for type Integer"),
+      ('{{ none|format }}', "Unknown filter 'format' for type None"),
+      ("{{ '{}'|format }}", 'format() expected at least 1 arguments, got 0'),
+      (
+        "{{ '{0}'|format(1) }}",
+        "format() only supports simple '{}' placeholders",
+      ),
+    ]) {
+      test('throws: $source', () {
+        expect(
+          () => Template(source).render({'a': 2}),
+          throwsA(predicate((Object e) => '$e'.contains(message))),
+        );
+      });
+    }
   });
 }

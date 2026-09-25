@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 import 'package:dinja/src/lexer.dart';
+import 'package:dinja/src/template.dart';
 
 void main() {
   group('Lexer', () {
@@ -93,6 +94,45 @@ void main() {
         TokenType.additiveBinaryOperator,
       ); // + is additive
     });
+  });
+
+  group('Minus after not', () {
+    List<(TokenType, String)> lex(String source) => [
+      for (final t in Lexer(source).tokenize().tokens) (t.type, t.value),
+    ];
+
+    test('is unary after the not operator', () {
+      expect(lex('{{ not -n }}')[2], (TokenType.unaryOperator, '-'));
+      expect(lex('{{ not -1 }}')[2], (TokenType.numericLiteral, '-1'));
+      expect(lex('{{ x is not +1 }}')[4], (TokenType.numericLiteral, '+1'));
+    });
+
+    test('stays binary after a member or filter named not', () {
+      expect(lex('{{ x.not - 1 }}')[4], (
+        TokenType.additiveBinaryOperator,
+        '-',
+      ));
+      expect(lex('{{ x|not - 1 }}')[4], (
+        TokenType.additiveBinaryOperator,
+        '-',
+      ));
+    });
+  });
+
+  group('Template text', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 print each of these verbatim.
+    for (final source in [
+      'a"        "b',
+      '"        "',
+      '{% if true %}x"        "y{% endif %}',
+    ]) {
+      test('keeps $source', () {
+        expect(
+          Template(source).render(),
+          source.replaceAll(RegExp(r'{%[^%]*%}'), ''),
+        );
+      });
+    }
   });
 
   group('Lexer Error Location', () {

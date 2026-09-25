@@ -346,12 +346,6 @@ class Lexer {
 
         String text = src.substring(textStart, textEnd);
 
-        // Pre-process: Clean up llama.cpp transparent indentation markers
-        // This MUST happen before trim/lstrip logic so that the text appears as intended.
-        if (text.contains('"        "')) {
-          text = text.replaceAll('"        "', '');
-        }
-
         // A. trim_blocks: remove first newline after block
         if (optTrimBlocks && lastBlockCanRmNewline) {
           if (text.startsWith('\n')) {
@@ -447,11 +441,6 @@ class Lexer {
         }
 
         if (text.isNotEmpty) {
-          // C. Clean up llama.cpp transparent indentation markers
-          if (text.contains('"        "')) {
-            text = text.replaceAll('"        "', '');
-          }
-
           tokens.add(Token(TokenType.text, text, startPos, line, col));
           continue;
         }
@@ -521,6 +510,8 @@ class Lexer {
         // Binary if previous token was identifier, literal, close paren/bracket
         bool isBinary = false;
         switch (lastTokenType) {
+          case TokenType.identifier when _isNotOperator(tokens):
+            break;
           case TokenType.identifier:
           case TokenType.numericLiteral:
           case TokenType.stringLiteral:
@@ -713,4 +704,11 @@ class Lexer {
 
     return LexerResult(tokens, src);
   }
+}
+
+bool _isNotOperator(List<Token> tokens) {
+  if (tokens.last.value != 'not') return false;
+  if (tokens.length < 2) return true;
+  final before = tokens[tokens.length - 2].type;
+  return before != TokenType.dot && before != TokenType.pipe;
 }

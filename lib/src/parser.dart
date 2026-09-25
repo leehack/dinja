@@ -632,7 +632,7 @@ class Parser {
   }
 
   Expression parseFilterExpression() {
-    var operand = parseCallMemberExpression();
+    var operand = parseUnaryExpression();
     while (isType(TokenType.pipe)) {
       final startPos = current;
       current++; // |
@@ -643,6 +643,15 @@ class Parser {
       operand = FilterExpression(startPos, operand, filter);
     }
     return operand;
+  }
+
+  Expression parseUnaryExpression() {
+    if (isType(TokenType.unaryOperator)) {
+      final startPos = current;
+      final op = tokens[current++];
+      return UnaryExpression(startPos, op, parseUnaryExpression());
+    }
+    return parseCallMemberExpression();
   }
 
   Expression parseCallMemberExpression() {
@@ -711,6 +720,7 @@ class Parser {
       final step = slices.length > 2 ? slices[2] : null;
       return SliceExpression(startPos, start, stop, step);
     }
+    if (slices.isEmpty) return BlankExpression(startPos);
     return slices[0]!;
   }
 

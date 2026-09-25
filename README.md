@@ -26,13 +26,17 @@ The primary goal is to support **LLM Chat Templates** and basic string rendering
 Dinja uses a taint-tracking mechanism similar to `MarkupSafe` in Python but adapted for this specific use case.
 
 - **`JinjaString`**: A wrapper around strings that tracks which parts come from the template (safe) and which come from user input (unsafe).
-- **Automatic Escaping**: untrusted user input is automatically escaped when rendered, while template structure remains untouched.
+- **Automatic Escaping**: values wrapped in `JinjaString.user(...)` are escaped when rendered, while template structure remains untouched. A plain `String` is treated as template text and is not escaped.
 
 ```dart
 final template = Template('Hello {{ name }}');
-// "name" contains HTML/special chars
-final result = template.render({'name': '<script>alert(1)</script>'});
+final result = template.render({
+  'name': JinjaString.user('<script>alert(1)</script>'),
+});
 // Output: Hello &lt;script&gt;alert(1)&lt;/script&gt;
+
+template.render({'name': '<script>alert(1)</script>'});
+// Output: Hello <script>alert(1)</script>
 ```
 
 ## Getting started

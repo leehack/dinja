@@ -20,7 +20,7 @@ dart example/chat_template_example.dart
 
 ## Security & Escaping
 
-`security_example.dart` showcases Dinja's automatic input escaping and how to mark strings as safe when necessary.
+`security_example.dart` shows that plain strings are not escaped, that values wrapped in `JinjaString.user` are, and how to mark user input as safe.
 
 ```bash
 dart example/security_example.dart

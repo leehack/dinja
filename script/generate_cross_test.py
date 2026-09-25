@@ -10,6 +10,21 @@ CPP_TEST_FILE = sys.argv[1] if len(sys.argv) > 1 else '../llama.cpp/tests/test-j
 # Output Dart test file
 DART_TEST_FILE = 'test/llama_cross_test.dart'
 
+LLAMA_CPP_REVISION = '7fe450e1'
+LLAMA_CPP_NOT_IMPLEMENTED = {
+    'tojson sort_keys=true',
+    'is sameas',
+    'is escaped',
+    'is filter',
+    'string.replace() with count',
+    'string.format() manual numbering',
+    'string.format() named fields',
+    'string.format() escaped braces',
+    'array|map with filter',
+    'array|min attribute',
+    'array|max attribute',
+}
+
 def parse_cpp_test_file(filepath):
     with open(filepath, 'r') as f:
         content = f.read()
@@ -49,14 +64,9 @@ def parse_cpp_test_file(filepath):
                 data = args[3]
                 expect = args[4]
                 
-                # Cleanup quotes
-                if name.startswith('"') and name.endswith('"'): name = name[1:-1]
-                if tmpl.startswith('"') and tmpl.endswith('"'): tmpl = tmpl[1:-1]
-                if expect.startswith('"') and expect.endswith('"'): expect = expect[1:-1]
-                
-                # Handle C++ string concatenation
-                tmpl = tmpl.replace('" "', '').replace('"\n"', '').replace('" \n"', '')
-                expect = expect.replace('" "', '').replace('"\n"', '').replace('" \n"', '')
+                name = join_cpp_string_literals(name)
+                tmpl = join_cpp_string_literals(tmpl)
+                expect = join_cpp_string_literals(expect)
                 
                 tests.append({
                     'name': name,
@@ -66,6 +76,23 @@ def parse_cpp_test_file(filepath):
                 })
     
     return tests
+
+def join_cpp_string_literals(arg):
+    if not arg.startswith('"'):
+        return arg
+    out = []
+    i = 0
+    while i < len(arg):
+        if arg[i] != '"':
+            i += 1
+            continue
+        i += 1
+        while arg[i] != '"':
+            step = 2 if arg[i] == '\\' else 1
+            out.append(arg[i:i + step])
+            i += step
+        i += 1
+    return ''.join(out)
 
 def parse_cpp_args(buffer):
     # Remove 'test_template(' prefix and ');' suffix
@@ -323,12 +350,15 @@ void main() {
             # Fallback to empty dict to allow generation to continue
             dart_data = '{}'
         
+        skip = ''
+        if test['name'] in LLAMA_CPP_NOT_IMPLEMENTED:
+            skip = f", skip: 'Not implemented in llama.cpp {LLAMA_CPP_REVISION}'"
         dart_code += f"""
     test('{name}', () {{
       final template = Template('{tmpl}');
       final Map<String, dynamic> data = {dart_data};
       expect(template.render(data), equals('{expect}'));
-    }});
+    }}{skip});
 """
 
     dart_code += """
@@ -345,6 +375,9 @@ def main():
 
     tests = parse_cpp_test_file(CPP_TEST_FILE)
     print(f"Found {len(tests)} tests.")
+    stale = LLAMA_CPP_NOT_IMPLEMENTED - {test['name'] for test in tests}
+    if stale:
+        print(f"Warning: not-implemented names without a test: {sorted(stale)}")
     
     dart_content = generate_dart_test(tests)
     

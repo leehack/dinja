@@ -396,34 +396,7 @@ class MacroStatement extends Statement {
       // Create macro context
       final macroCtx = ctx.derive();
 
-      // Bind arguments
-      for (int i = 0; i < args.length; i++) {
-        final argDef = args[i];
-        if (argDef is Identifier) {
-          // Positional arg
-          if (i < callArgs.length) {
-            macroCtx.set(argDef.name, callArgs[i]);
-          } else {
-            macroCtx.set(argDef.name, const JinjaUndefined());
-          }
-        } else if (argDef is KeywordArgumentExpression) {
-          // Default value: arg=default
-          final key = argDef.key;
-          if (key is! Identifier) {
-            throw Exception('Invalid arg definition');
-          }
-          final paramName = key.name;
-
-          if (callKwargs.containsKey(paramName)) {
-            macroCtx.set(paramName, callKwargs[paramName]!);
-          } else if (i < callArgs.length) {
-            macroCtx.set(paramName, callArgs[i]);
-          } else {
-            // Use default
-            macroCtx.set(paramName, argDef.val.execute(ctx));
-          }
-        }
-      }
+      _bindParameters(macroName, args, callArgs, callKwargs, macroCtx, ctx);
 
       // Inject 'caller' if present in kwargs (from {% call %})
       if (callKwargs.containsKey('caller')) {
@@ -435,6 +408,51 @@ class MacroStatement extends Statement {
 
     ctx.set(macroName, func);
     return const JinjaNone();
+  }
+}
+
+void _bindParameters(
+  String name,
+  List<Statement> params,
+  List<JinjaValue> args,
+  Map<String, JinjaValue> kwargs,
+  Context target,
+  Context defaults,
+) {
+  final names = [
+    for (final param in params)
+      switch (param) {
+        Identifier(name: final param) => param,
+        KeywordArgumentExpression(key: Identifier(name: final param)) => param,
+        _ => throw Exception("Invalid parameter in '$name'"),
+      },
+  ];
+  var argCount = args.length;
+  for (final key in kwargs.keys) {
+    if (key == 'caller') continue;
+    argCount++;
+    final index = names.indexOf(key);
+    if (index < 0) {
+      throw Exception("macro '$name' takes no keyword argument '$key'");
+    }
+    if (index < args.length) {
+      throw Exception("macro '$name' got multiple values for argument '$key'");
+    }
+  }
+  for (var i = 0; i < params.length; i++) {
+    final param = params[i];
+    final paramName = names[i];
+    if (i < args.length) {
+      target.set(paramName, args[i]);
+    } else if (kwargs.containsKey(paramName)) {
+      target.set(paramName, kwargs[paramName]!);
+    } else if (param is KeywordArgumentExpression) {
+      target.set(paramName, param.val.execute(defaults));
+    } else if (i < argCount) {
+      target.set(paramName, const JinjaUndefined());
+    } else {
+      throw Exception("Not enough arguments provided to '$name'");
+    }
   }
 }
 
@@ -472,13 +490,14 @@ class CallStatement extends Statement {
 
     final callerMacro = JinjaFunction('caller', (callArgs, callKwargs) {
       final callerCtx = ctx.derive();
-      // Bind callerArgs names to the values passed to caller()
-      for (int i = 0; i < callArgs.length && i < callerArgs.length; i++) {
-        final argDef = callerArgs[i];
-        if (argDef is Identifier) {
-          callerCtx.set(argDef.name, callArgs[i]);
-        }
-      }
+      _bindParameters(
+        'caller',
+        callerArgs,
+        callArgs,
+        callKwargs,
+        callerCtx,
+        ctx,
+      );
       final out = StringBuffer();
       for (final stmt in body) {
         out.write(stmt.execute(callerCtx).toString());
@@ -766,10 +785,13 @@ class MemberExpression extends Expression {
       return const JinjaUndefined();
     }
 
-    if (computed) {
-      // Bracket notation: obj[expr]
+    if (computed || property is IntegerLiteral) {
+      // Bracket notation: obj[expr], or an index after a dot: obj.0
       final obj = object.execute(ctx);
       final prop = property.execute(ctx);
+      if (!computed && prop.asInt < 0) {
+        throw Exception('Static member property cannot be negative');
+      }
 
       if (obj is JinjaMap) {
         // Bracket access: check keys FIRST
@@ -854,6 +876,15 @@ class MemberExpression extends Expression {
       return const JinjaUndefined();
     }
   }
+}
+
+/// Represents an empty subscript, as in `a[]`, which evaluates to undefined.
+class BlankExpression extends Expression {
+  BlankExpression(super.pos);
+  @override
+  String get type => 'BlankExpression';
+  @override
+  JinjaValue execute(Context ctx) => const JinjaUndefined();
 }
 
 /// Represents a function or macro call expression.
@@ -957,6 +988,13 @@ class BinaryExpression extends Expression {
             JinjaString([
               for (var i = 0; i < r.asInt; i++) ...l.value.parts,
             ], isSafe: l.isSafe),
+          );
+        }
+        if (l is JinjaInteger && r is JinjaStringValue) {
+          return JinjaStringValue(
+            JinjaString([
+              for (var i = 0; i < l.value; i++) ...r.value.parts,
+            ], isSafe: r.isSafe),
           );
         }
         throw Exception('Invalid operand types for *');
@@ -1275,5 +1313,6 @@ class SpreadExpression extends Expression {
   @override
   String get type => 'SpreadExpression';
   @override
-  JinjaValue execute(Context ctx) => argument.execute(ctx);
+  JinjaValue execute(Context ctx) =>
+      throw Exception('Argument unpacking with * is not supported');
 }
