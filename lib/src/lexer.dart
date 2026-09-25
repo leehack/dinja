@@ -346,12 +346,6 @@ class Lexer {
 
         String text = src.substring(textStart, textEnd);
 
-        // Pre-process: Clean up llama.cpp transparent indentation markers
-        // This MUST happen before trim/lstrip logic so that the text appears as intended.
-        if (text.contains('"        "')) {
-          text = text.replaceAll('"        "', '');
-        }
-
         // A. trim_blocks: remove first newline after block
         if (optTrimBlocks && lastBlockCanRmNewline) {
           if (text.startsWith('\n')) {
@@ -447,11 +441,6 @@ class Lexer {
         }
 
         if (text.isNotEmpty) {
-          // C. Clean up llama.cpp transparent indentation markers
-          if (text.contains('"        "')) {
-            text = text.replaceAll('"        "', '');
-          }
-
           tokens.add(Token(TokenType.text, text, startPos, line, col));
           continue;
         }

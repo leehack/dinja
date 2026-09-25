@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 import 'package:dinja/src/lexer.dart';
+import 'package:dinja/src/template.dart';
 
 void main() {
   group('Lexer', () {
@@ -116,6 +117,22 @@ void main() {
         '-',
       ));
     });
+  });
+
+  group('Template text', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 print each of these verbatim.
+    for (final source in [
+      'a"        "b',
+      '"        "',
+      '{% if true %}x"        "y{% endif %}',
+    ]) {
+      test('keeps $source', () {
+        expect(
+          Template(source).render(),
+          source.replaceAll(RegExp(r'{%[^%]*%}'), ''),
+        );
+      });
+    }
   });
 
   group('Lexer Error Location', () {

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:test/test.dart';
 import 'package:dinja/dinja.dart';
 
@@ -1089,6 +1091,149 @@ void main() {
               ),
             ),
           ),
+        );
+      });
+    }
+  });
+
+  group('indent line handling', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (input, args, expected) in [
+      ('foo\n', '', 'foo\n'),
+      ('foo\n', '(2, true)', '  foo\n'),
+      ('foo\n\n', '', 'foo\n\n'),
+      ('foo\nbar\n', '', 'foo\n    bar\n'),
+      ('a\n\nb\n', '(2)', 'a\n\n  b\n'),
+      ('\n', '', '\n'),
+      ('\n', '(2, true)', '  \n'),
+      ('', '', ''),
+      ('\nfoo', '(2, true)', '  \n  foo'),
+    ]) {
+      test('${jsonEncode(input)}|indent$args', () {
+        expect(Template('{{ s|indent$args }}').render({'s': input}), expected);
+      });
+    }
+
+    // llama.cpp 7fe450e1 gives an empty string; Jinja2 3.1.6 gives '  '.
+    test("''|indent(2, true) follows llama.cpp", () {
+      expect(Template('{{ s|indent(2, true) }}').render({'s': ''}), '');
+    });
+
+    // Jinja2 3.1.6 gives these; llama.cpp 7fe450e1 drops the leading empty
+    // lines.
+    for (final (input, args, expected) in [
+      ('\nfoo', '', '\n    foo'),
+      ('\n\nfoo', '(2, false, true)', '\n  \n  foo'),
+    ]) {
+      test('unchanged: ${jsonEncode(input)}|indent$args', () {
+        expect(Template('{{ s|indent$args }}').render({'s': input}), expected);
+      });
+    }
+
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    for (final (input, args, expected) in [
+      ('\n', '(2, false, true)', '\n  '),
+      ('foo\n', '(2, false, true)', 'foo\n  '),
+    ]) {
+      test('unchanged: ${jsonEncode(input)}|indent$args', () {
+        expect(Template('{{ s|indent$args }}').render({'s': input}), expected);
+      });
+    }
+
+    for (final (input, expected) in [
+      ('foo', 'foo'),
+      ('foo\r\nbar', 'foo\r\n    bar'),
+      ('  \nfoo', '  \n    foo'),
+    ]) {
+      test('unchanged: ${jsonEncode(input)}|indent', () {
+        expect(Template('{{ s|indent }}').render({'s': input}), expected);
+      });
+    }
+  });
+
+  group('Tests that take an argument', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 both throw for each of these.
+    for (final source in [
+      '{{ a is divisibleby }}',
+      '{{ a is eq }}',
+      '{{ a is equalto }}',
+      '{{ a is ne }}',
+      '{{ a is gt }}',
+      '{{ a is greaterthan }}',
+      '{{ a is ge }}',
+      '{{ a is lt }}',
+      '{{ a is lessthan }}',
+      '{{ a is in }}',
+      '{{ a is divisibleby -a }}',
+      '{{ -2 is eq -a }}',
+      "{{ [1, 2]|select('eq')|list }}",
+    ]) {
+      test('throw without one: $source', () {
+        expect(
+          () => Template(source).render({'a': 2}),
+          throwsA(
+            predicate((Object e) => '$e'.contains('Test expected 2 arguments')),
+          ),
+        );
+      });
+    }
+
+    for (final source in [
+      '{{ a is le }}',
+      '{{ a is sameas }}',
+      '{{ a is startingwith }}',
+      '{{ a is endingwith }}',
+      '{{ a is ieq }}',
+    ]) {
+      test('throw without one: $source', () {
+        expect(
+          () => Template(source).render({'a': 2}),
+          throwsA(
+            predicate((Object e) => '$e'.contains('Test expected 2 arguments')),
+          ),
+        );
+      });
+    }
+
+    for (final (source, expected) in [
+      ('{{ a is divisibleby(-a) }}', 'True'),
+      ('{{ -2 is eq(-a) }}', 'True'),
+      ('{{ a is divisibleby 2 }}', 'True'),
+      ("{{ [1, 2]|select('eq', 2)|join(',') }}", '2'),
+    ]) {
+      test('unchanged: $source', () {
+        expect(Template(source).render({'a': 2}), expected);
+      });
+    }
+  });
+
+  group('format filter', () {
+    // llama.cpp 7fe450e1 gives each of these outputs; the filter reaches its
+    // `{}`-only string format method.
+    for (final (source, expected) in [
+      ("{{ '{}-{}'|format(1, 2) }}", '1-2'),
+      ("{{ '%s-%s'|format(1, 2) }}", '%s-%s'),
+      ("{{ 'plain'|format }}", 'plain'),
+      ("{{ '%(x)s'|format(x=1) }}", '%(x)s'),
+    ]) {
+      test(source, () {
+        expect(Template(source).render(), expected);
+      });
+    }
+
+    for (final (source, message) in [
+      ('{{ a|format }}', "Unknown filter 'format' for type Integer"),
+      ('{{ none|format }}', "Unknown filter 'format' for type None"),
+      ("{{ '{}'|format }}", 'format() expected at least 1 arguments, got 0'),
+      (
+        "{{ '{0}'|format(1) }}",
+        "format() only supports simple '{}' placeholders",
+      ),
+    ]) {
+      test('throws: $source', () {
+        expect(
+          () => Template(source).render({'a': 2}),
+          throwsA(predicate((Object e) => '$e'.contains(message))),
         );
       });
     }

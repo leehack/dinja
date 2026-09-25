@@ -1313,5 +1313,6 @@ class SpreadExpression extends Expression {
   @override
   String get type => 'SpreadExpression';
   @override
-  JinjaValue execute(Context ctx) => argument.execute(ctx);
+  JinjaValue execute(Context ctx) =>
+      throw Exception('Argument unpacking with * is not supported');
 }

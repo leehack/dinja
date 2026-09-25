@@ -225,6 +225,29 @@ void main() {
     }
   });
 
+  group('Argument unpacking', () {
+    // llama.cpp 7fe450e1 throws for each of these; Jinja2 3.1.6 unpacks.
+    for (final source in [
+      '{% macro f(a, b, c) %}{{ a }}{% endmacro %}{{ f(*[1, 2, 3]) }}',
+      '{% macro f(a, b, c) %}{{ a }}{% endmacro %}{{ f(*[1, 2], c=3) }}',
+      '{{ range(*[1, 4])|list }}',
+      "{{ 'a-b'.split(*['-']) }}",
+      "{{ [1, 2]|join(*[', ']) }}",
+    ]) {
+      test('throws: $source', () {
+        expect(
+          () => Template(source).render(),
+          throwsA(
+            predicate(
+              (Object e) =>
+                  '$e'.contains('Argument unpacking with * is not supported'),
+            ),
+          ),
+        );
+      });
+    }
+  });
+
   group('Numeric member access', () {
     final data = <String, dynamic>{
       'user': 'abcdefghijk'.split(''),

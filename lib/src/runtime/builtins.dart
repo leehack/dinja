@@ -59,6 +59,7 @@ final Map<String, JinjaFunctionHandler> globalFilters = {
   'upper': _upper,
   'lower': _lower,
   'indent': _indent,
+  'format': _formatFilter,
   'string': _string,
   'title': (args, kwargs) =>
       (_resolveStringMember(
@@ -1145,7 +1146,7 @@ JinjaValue _testIsStartingWith(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   final str = args[0].toString();
   final prefix = args[1].toString();
   return JinjaBoolean(str.startsWith(prefix));
@@ -1155,7 +1156,7 @@ JinjaValue _testIsEndingWith(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   final str = args[0].toString();
   final suffix = args[1].toString();
   return JinjaBoolean(str.endsWith(suffix));
@@ -1165,7 +1166,7 @@ JinjaValue _testIsEqualTo(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   return JinjaBoolean(args[0].toString() == args[1].toString());
 }
 
@@ -1173,7 +1174,7 @@ JinjaValue _testIsIequalTo(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   return JinjaBoolean(
     args[0].toString().toLowerCase() == args[1].toString().toLowerCase(),
   );
@@ -1183,7 +1184,7 @@ JinjaValue _testIsNotEqualTo(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   return JinjaBoolean(args[0].toString() != args[1].toString());
 }
 
@@ -1191,7 +1192,7 @@ JinjaValue _testIsGreaterThan(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   if (args[0].isNumeric && args[1].isNumeric) {
     return JinjaBoolean(args[0].asDouble > args[1].asDouble);
   }
@@ -1202,7 +1203,7 @@ JinjaValue _testIsGreaterThanOrEqual(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   if (args[0].isNumeric && args[1].isNumeric) {
     return JinjaBoolean(args[0].asDouble >= args[1].asDouble);
   }
@@ -1213,7 +1214,7 @@ JinjaValue _testIsLessThan(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   if (args[0].isNumeric && args[1].isNumeric) {
     return JinjaBoolean(args[0].asDouble < args[1].asDouble);
   }
@@ -1224,7 +1225,7 @@ JinjaValue _testIsLessThanOrEqual(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   if (args[0].isNumeric && args[1].isNumeric) {
     return JinjaBoolean(args[0].asDouble <= args[1].asDouble);
   }
@@ -1232,7 +1233,7 @@ JinjaValue _testIsLessThanOrEqual(
 }
 
 JinjaValue _testIsIn(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   final item = args[0];
   final collection = args[1];
 
@@ -1604,6 +1605,23 @@ JinjaStringValue _format(JinjaStringValue fmt, List<JinjaValue> args) {
   return JinjaStringValue(JinjaString(parts));
 }
 
+JinjaValue _formatFilter(
+  List<JinjaValue> args,
+  Map<String, JinjaValue> kwargs,
+) {
+  final value = args.isEmpty ? const JinjaUndefined() : args[0];
+  if (value is! JinjaStringValue) {
+    throw Exception("Unknown filter 'format' for type ${value.typeName}");
+  }
+  return _format(value, args.sublist(1));
+}
+
+void _requireTestArgument(List<JinjaValue> args) {
+  if (args.length < 2) {
+    throw Exception('Test expected 2 arguments, got ${args.length}');
+  }
+}
+
 JinjaValue _strip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
   final v = args[0];
@@ -1801,25 +1819,19 @@ JinjaValue _indent(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final indentStr = width is JinjaStringValue
       ? width.toString()
       : ' ' * (width?.asInt ?? 4);
-  final lines = str.split('\n');
+  final lines = str.isEmpty ? <String>[] : str.split('\n');
+  final trailingNewline = str.endsWith('\n');
+  if (trailingNewline) lines.removeLast();
   final buffer = StringBuffer();
-
-  for (int i = 0; i < lines.length; i++) {
+  for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
-    if (line.isEmpty && !blank) {
-      buffer.writeln(line);
-      continue;
-    }
-
-    if (i == 0 && !first) {
-      buffer.write(line);
-    } else {
-      buffer.write('$indentStr$line');
-    }
-
-    if (i < lines.length - 1) {
-      buffer.write('\n');
-    }
+    if (i > 0) buffer.write('\n');
+    if (i == 0 ? first : (line.isNotEmpty || blank)) buffer.write(indentStr);
+    buffer.write(line);
+  }
+  if (trailingNewline) {
+    buffer.write('\n');
+    if (blank) buffer.write(indentStr);
   }
 
   return _derived(args[0], buffer.toString());
@@ -1903,7 +1915,7 @@ JinjaValue _testIsDivisibleBy(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   final n = args[1].asInt;
   if (n == 0) return const JinjaBoolean(false);
   return JinjaBoolean(args[0].asInt % n == 0);
@@ -1925,7 +1937,7 @@ JinjaValue _testIsSameAs(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
 ) {
-  if (args.length < 2) return const JinjaBoolean(false);
+  _requireTestArgument(args);
   return JinjaBoolean(identical(args[0], args[1]) || args[0] == args[1]);
 }
 
