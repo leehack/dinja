@@ -12,7 +12,7 @@ void main() {
             'b': [2, 3],
           },
         }),
-        equals('{"a":1,"b":[2,3]}'),
+        equals('{"a": 1, "b": [2, 3]}'),
       );
     });
 
@@ -537,7 +537,7 @@ void main() {
       };
       expect(
         Template("{{ data|tojson }}").render({'data': data}),
-        equals('{"a":1,"b":[2,3]}'),
+        equals('{"a": 1, "b": [2, 3]}'),
       );
       // Indent
       // We can't easily match exact indented string in expect, but we can check if it contains newlines
@@ -682,6 +682,267 @@ void main() {
           equals('2'),
         );
       });
+    });
+  });
+
+  group('tojson matches llama.cpp', () {
+    // Expected values are llama.cpp common/jinja output at 7fe450e1.
+    final cases = <(String, String, Map<String, dynamic>, String)>[
+      (
+        'spaces separators as json.dumps does',
+        "{{ {'a': 1, 'b': [1, 2]} | tojson }}",
+        {},
+        '{"a": 1, "b": [1, 2]}',
+      ),
+      (
+        'keeps insertion key order',
+        "{{ {'b': 1, 'a': 2, 'c': {'z': 1, 'y': 2}} | tojson }}",
+        {},
+        '{"b": 1, "a": 2, "c": {"z": 1, "y": 2}}',
+      ),
+      (
+        'nested values',
+        "{{ {'a': [1, {'b': [none, true, false]}], 'c': {}} | tojson }}",
+        {},
+        '{"a": [1, {"b": [null, true, false]}], "c": {}}',
+      ),
+      ('empty containers', "{{ [[], {}, ''] | tojson }}", {}, '[[], {}, ""]'),
+      (
+        'negative indent is inline',
+        "{{ {'a': 1, 'b': [1, 2]} | tojson(indent=-1) }}",
+        {},
+        '{"a": 1, "b": [1, 2]}',
+      ),
+      (
+        'ignores a string indent',
+        "{{ {'a': 1} | tojson(indent='  ') }}",
+        {},
+        '{"a": 1}',
+      ),
+      (
+        'ignores a boolean indent',
+        '{{ [1] | tojson(indent=true) }}',
+        {},
+        '[1]',
+      ),
+      ('ignores a float indent', '{{ [1] | tojson(indent=2.0) }}', {}, '[1]'),
+      (
+        'first positional argument is ensure_ascii',
+        "{{ {'a': 'é'} | tojson(2) }}",
+        {},
+        '{"a": "\\u00e9"}',
+      ),
+      (
+        'second positional argument is indent',
+        "{{ {'a': 'é'} | tojson(false, 2) }}",
+        {},
+        '{\n  "a": "é"\n}',
+      ),
+      (
+        'one separator sets only the item separator',
+        "{{ {'a': 1, 'b': [1, 2]} | tojson(separators=[';']) }}",
+        {},
+        '{"a": 1;"b": [1;2]}',
+      ),
+      (
+        'ignores string separators',
+        "{{ [1, 2] | tojson(separators=';=') }}",
+        {},
+        '[1, 2]',
+      ),
+      ('keeps non-ASCII by default', "{{ 'é✓😀中' | tojson }}", {}, '"é✓😀中"'),
+      (
+        'keeps non-ASCII keys and values',
+        '{{ x | tojson }}',
+        {
+          'x': {'é': 'Montréal ✓ 😀'},
+        },
+        '{"é": "Montréal ✓ 😀"}',
+      ),
+      (
+        'ensure_ascii escapes UTF-16 code units',
+        '{{ x | tojson(ensure_ascii=true) }}',
+        {
+          'x': {'é': 'Montréal ✓ 😀'},
+        },
+        '{"\\u00e9": "Montr\\u00e9al \\u2713 \\ud83d\\ude00"}',
+      ),
+      ('positional ensure_ascii false', "{{ 'é' | tojson(false) }}", {}, '"é"'),
+      (
+        'ensure_ascii leaves separators alone',
+        "{{ {'a': 'é'} | tojson(ensure_ascii=true, separators=('é', ' ✓ ')) }}",
+        {},
+        '{"a" ✓ "\\u00e9"}',
+      ),
+      (
+        'escapes only control characters, quote and backslash',
+        '{{ x | tojson }}',
+        {'x': '\n\t\r\b\f\u{1}\u{1f}\u{7f}\u{2028}/\\"'},
+        '"\\n\\t\\r\\b\\f\\u0001\\u001f\u{7f}\u{2028}/\\\\\\""',
+      ),
+      (
+        'NUL, DEL and Latin-1',
+        '{{ x | tojson }}',
+        {'x': '\u{0}\u{7f}\u{80}ÿ'},
+        '"\\u0000\u{7f}\u{80}ÿ"',
+      ),
+      (
+        'integers',
+        '{{ x | tojson }}',
+        {
+          'x': [0, -5, 9007199254740991, -12345678901234],
+        },
+        '[0, -5, 9007199254740991, -12345678901234]',
+      ),
+      (
+        'float literals use %g',
+        '{{ [1.0, -2.25, 0.1, 1.5, 3.14159265, 100000.0, 1234567.0] | tojson }}',
+        {},
+        '[1, -2.25, 0.1, 1.5, 3.14159, 100000, 1.23457e+06]',
+      ),
+      (
+        'floats use %g with 6 significant digits',
+        '{{ x | tojson }}',
+        {
+          'x': [
+            1.0,
+            0.5,
+            -2.25,
+            3.14159265,
+            1e+20,
+            1e-07,
+            1.5e+300,
+            -0.0,
+            123456.0,
+            1234567.5,
+            0.0001,
+            1e-05,
+          ],
+        },
+        '[1, 0.5, -2.25, 3.14159, 1e+20, 1e-07, 1.5e+300, -0, 123456, 1.23457e+06, 0.0001, 1e-05]',
+      ),
+      (
+        'float rounding ties go to even',
+        '{{ [1234565.0, 0.0009765625, 1234575.0, 999999.5, 9999995.0, 0.5, 0.000025, 123456.5] | tojson }}',
+        {},
+        '[1.23456e+06, 0.000976562, 1.23458e+06, 1e+06, 1e+07, 0.5, 2.5e-05, 123456]',
+      ),
+      (
+        'large and small floats',
+        '{{ [1000000000000000.0, 10000000000000000.0, 123456789012.0, 100000.0, 1000000.0, 0.001, 0.0001234567] | tojson }}',
+        {},
+        '[1e+15, 1e+16, 1.23457e+11, 100000, 1e+06, 0.001, 0.000123457]',
+      ),
+      (
+        'subnormal, maximum and a carry into the exponent',
+        '{{ x | tojson }}',
+        {
+          'x': [
+            5e-324,
+            2.2250738585072014e-308,
+            1.7976931348623157e308,
+            9.9999949e-5,
+            0.000099999951,
+          ],
+        },
+        '[4.94066e-324, 2.22507e-308, 1.79769e+308, 9.99999e-05, 0.0001]',
+      ),
+      (
+        'booleans and none',
+        '{{ [true, false, none, True, False, None] | tojson }}',
+        {},
+        '[true, false, null, true, false, null]',
+      ),
+      ('tuple is an array', "{{ (1, 'a') | tojson }}", {}, '[1, "a"]'),
+      ('integer key', "{{ {1: 'a'} | tojson }}", {}, '{"1": "a"}'),
+      ('float key', "{{ {2.5: 'a'} | tojson }}", {}, '{"2.5": "a"}'),
+      ('boolean key', "{{ {true: 'a'} | tojson }}", {}, '{"True": "a"}'),
+      ('none key', "{{ {none: 'a'} | tojson }}", {}, '{"None": "a"}'),
+      (
+        'tool declaration',
+        '{{ tools | tojson }}',
+        {
+          'tools': [
+            {
+              'type': 'function',
+              'function': {
+                'name': 'get_weather',
+                'description':
+                    'Get the weather in a city, e.g. "Montréal" <or> \'Paris\' & more',
+                'parameters': {
+                  'type': 'object',
+                  'properties': {
+                    'city': {'type': 'string', 'description': 'City name'},
+                    'days': {
+                      'type': 'integer',
+                      'minimum': 1,
+                      'maximum': 7,
+                      'default': 1.5,
+                    },
+                  },
+                  'required': ['city'],
+                },
+              },
+            },
+          ],
+        },
+        '[{"type": "function", "function": {"name": "get_weather", "description": "Get the weather in a city, e.g. \\"Montréal\\" <or> \'Paris\' & more", "parameters": {"type": "object", "properties": {"city": {"type": "string", "description": "City name"}, "days": {"type": "integer", "minimum": 1, "maximum": 7, "default": 1.5}}, "required": ["city"]}}}]',
+      ),
+      (
+        'tool declaration with indent',
+        '{{ tools | tojson(indent=4) }}',
+        {
+          'tools': [
+            {
+              'type': 'function',
+              'function': {
+                'name': 'get_weather',
+                'description':
+                    'Get the weather in a city, e.g. "Montréal" <or> \'Paris\' & more',
+                'parameters': {
+                  'type': 'object',
+                  'properties': {
+                    'city': {'type': 'string', 'description': 'City name'},
+                    'days': {
+                      'type': 'integer',
+                      'minimum': 1,
+                      'maximum': 7,
+                      'default': 1.5,
+                    },
+                  },
+                  'required': ['city'],
+                },
+              },
+            },
+          ],
+        },
+        '[\n    {\n        "type": "function",\n        "function": {\n            "name": "get_weather",\n            "description": "Get the weather in a city, e.g. \\"Montréal\\" <or> \'Paris\' & more",\n            "parameters": {\n                "type": "object",\n                "properties": {\n                    "city": {\n                        "type": "string",\n                        "description": "City name"\n                    },\n                    "days": {\n                        "type": "integer",\n                        "minimum": 1,\n                        "maximum": 7,\n                        "default": 1.5\n                    }\n                },\n                "required": [\n                    "city"\n                ]\n            }\n        }\n    }\n]',
+      ),
+      (
+        'input-marked strings are not escaped',
+        '{{ x | tojson }}',
+        {
+          'x': {
+            't': [
+              {'d': JinjaString.user('<x>')},
+            ],
+          },
+        },
+        '{"t": [{"d": "<x>"}]}',
+      ),
+    ];
+    for (final (name, source, data, expected) in cases) {
+      test(name, () => expect(Template(source).render(data), expected));
+    }
+
+    test('a whole-number double from Dart is an integer on the web', () {
+      final output = Template(
+        '{{ x | tojson }}|{{ x }}',
+      ).render({'x': 1234567.0});
+      expect(
+        output,
+        identical(0, 0.0) ? '1234567|1234567' : '1.23457e+06|1234567.0',
+      );
     });
   });
 }

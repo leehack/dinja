@@ -1,8 +1,9 @@
 // ignore_for_file: non_constant_identifier_names
 import '../types/value.dart';
 import '../types/jinja_string.dart';
+import '../types/repr.dart';
 import 'dart:math' as math;
-import 'dart:convert';
+import 'dart:typed_data';
 
 // Global built-ins map
 // Global registries
@@ -280,81 +281,161 @@ JinjaValue _range(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 
 JinjaValue _tojson(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
-  final v = args[0];
-  final indent = kwargs['indent']?.asInt;
-  final sortKeys = kwargs['sort_keys']?.asBool ?? false;
-  final ensureAscii = kwargs['ensure_ascii']?.asBool ?? true;
+  JinjaValue? arg(String name, int pos) =>
+      kwargs[name] ?? (pos < args.length ? args[pos] : null);
 
-  Object? data = v.toDart();
-  if (sortKeys) {
-    data = _sortJsonData(data);
-  }
-
-  String itemSep = indent == null ? ',' : ', ';
-  String keySep = indent == null ? ':' : ': ';
-
-  final separatorsArg = kwargs['separators'];
-  if (separatorsArg is JinjaList || separatorsArg is JinjaTuple) {
-    final items = separatorsArg is JinjaList
-        ? separatorsArg.items
-        : (separatorsArg as JinjaTuple).items;
-    if (items.length >= 2) {
-      itemSep = items[0].toString();
-      keySep = items[1].toString();
-    }
-  }
-
-  final encoder = indent != null
-      ? JsonEncoder.withIndent(' ' * indent)
-      : const JsonEncoder();
-
-  String result = encoder.convert(data);
-
-  if (indent != null) {
-    if (itemSep != ', ' || keySep != ': ') {
-      result = result.replaceAll(', ', itemSep).replaceAll(': ', keySep);
-    }
-  } else {
-    if (itemSep != ',' || keySep != ':') {
-      result = result.replaceAll(',', itemSep).replaceAll(':', keySep);
-    }
-  }
-
-  if (ensureAscii) {
-    result = _ensureAscii(result);
-  }
-
+  final indentArg = arg('indent', 2);
+  final indent = indentArg is JinjaInteger ? indentArg.value : -1;
+  final separatorsArg = arg('separators', 3);
+  final separators = separatorsArg is JinjaList || separatorsArg is JinjaTuple
+      ? separatorsArg!.asList
+      : const <JinjaValue>[];
+  final out = StringBuffer();
+  _writeJson(
+    out,
+    args[0],
+    0,
+    indent: indent,
+    itemSep: separators.isNotEmpty
+        ? separators[0].toString()
+        : (indent < 0 ? ', ' : ','),
+    keySep: separators.length > 1 ? separators[1].toString() : ': ',
+    ensureAscii: arg('ensure_ascii', 1)?.asBool ?? false,
+    sortKeys: arg('sort_keys', 4)?.asBool ?? false,
+  );
   return JinjaStringValue(
-    JinjaString([JinjaStringPart(result, false)], isSafe: true),
+    JinjaString([JinjaStringPart(out.toString(), false)], isSafe: true),
   );
 }
 
-String _ensureAscii(String s) {
-  var res = StringBuffer();
-  for (var i = 0; i < s.length; i++) {
-    var char = s[i];
-    var code = char.codeUnitAt(0);
-    if (code > 127) {
-      res.write('\\u${code.toRadixString(16).padLeft(4, '0')}');
-    } else {
-      res.write(char);
+void _writeJson(
+  StringBuffer out,
+  JinjaValue v,
+  int level, {
+  required int indent,
+  required String itemSep,
+  required String keySep,
+  required bool ensureAscii,
+  required bool sortKeys,
+}) {
+  final newline = indent >= 0 ? '\n' : '';
+  final pad = indent > 0 ? ' ' * indent : '';
+  void writeItems<T>(
+    String open,
+    String close,
+    List<T> items,
+    void Function(T item) writeItem,
+  ) {
+    out.write(open);
+    if (items.isNotEmpty) {
+      out.write(newline);
+      for (var i = 0; i < items.length; i++) {
+        out.write(pad * (level + 1));
+        writeItem(items[i]);
+        if (i < items.length - 1) out.write(itemSep);
+        out.write(newline);
+      }
+      out.write(pad * level);
     }
+    out.write(close);
   }
-  return res.toString();
+
+  void writeValue(JinjaValue item) => _writeJson(
+    out,
+    item,
+    level + 1,
+    indent: indent,
+    itemSep: itemSep,
+    keySep: keySep,
+    ensureAscii: ensureAscii,
+    sortKeys: sortKeys,
+  );
+
+  if (v is JinjaBoolean) {
+    out.write(v.value ? 'true' : 'false');
+  } else if (v is JinjaInteger) {
+    out.write(v.value);
+  } else if (v is JinjaFloat) {
+    out.write(_formatDouble(v.value));
+  } else if (v is JinjaStringValue) {
+    out.write('"${jsonEscape(v.toString(), ensureAscii: ensureAscii)}"');
+  } else if (v is JinjaList || v is JinjaTuple) {
+    writeItems('[', ']', v.asList, writeValue);
+  } else if (v is JinjaMap) {
+    final entries = v.items.entries
+        .map((e) => MapEntry(e.key.toString(), e.value))
+        .toList();
+    if (sortKeys) entries.sort((a, b) => a.key.compareTo(b.key));
+    writeItems('{', '}', entries, (MapEntry<String, JinjaValue> e) {
+      out.write('"${jsonEscape(e.key, ensureAscii: ensureAscii)}"$keySep');
+      writeValue(e.value);
+    });
+  } else {
+    out.write('null');
+  }
 }
 
-Object? _sortJsonData(Object? data) {
-  if (data is Map) {
-    final sortedKeys = data.keys.toList()..sort();
-    final result = <String, dynamic>{};
-    for (final key in sortedKeys) {
-      result[key.toString()] = _sortJsonData(data[key]);
-    }
-    return result;
-  } else if (data is List) {
-    return data.map((e) => _sortJsonData(e)).toList();
+/// Formats [v] as C++ `std::ostream` does by default (`%g` with precision 6),
+/// which llama.cpp's `tojson` uses for floats.
+String _formatDouble(double v) {
+  if (v.isNaN) return 'nan';
+  if (v.isInfinite) return v > 0 ? 'inf' : '-inf';
+  final sign = v.isNegative ? '-' : '';
+  if (v == 0) return '${sign}0';
+
+  final bytes = ByteData(8)..setFloat64(0, v.abs());
+  final high = bytes.getUint32(0);
+  final biased = high >> 20;
+  var mantissa =
+      (BigInt.from(high & 0xfffff) << 32) | BigInt.from(bytes.getUint32(4));
+  var exp2 = -1074;
+  if (biased != 0) {
+    mantissa |= BigInt.one << 52;
+    exp2 = biased - 1075;
   }
-  return data;
+  final num = exp2 >= 0 ? mantissa << exp2 : mantissa;
+  final den = exp2 >= 0 ? BigInt.one : BigInt.one << -exp2;
+
+  const precision = 6;
+  final ten = BigInt.from(10);
+  bool atLeastPowerOfTen(int e) =>
+      e >= 0 ? num >= den * ten.pow(e) : num * ten.pow(-e) >= den;
+  var exp10 = int.parse(v.abs().toStringAsExponential(0).split('e')[1]);
+  while (!atLeastPowerOfTen(exp10)) {
+    exp10--;
+  }
+  while (atLeastPowerOfTen(exp10 + 1)) {
+    exp10++;
+  }
+
+  final shift = precision - 1 - exp10;
+  final scaledNum = shift >= 0 ? num * ten.pow(shift) : num;
+  final scaledDen = shift >= 0 ? den : den * ten.pow(-shift);
+  var digits = scaledNum ~/ scaledDen;
+  final twiceRemainder = (scaledNum % scaledDen) * BigInt.two;
+  if (twiceRemainder > scaledDen ||
+      twiceRemainder == scaledDen && digits.isOdd) {
+    digits += BigInt.one;
+  }
+  if (digits == ten.pow(precision)) {
+    digits = ten.pow(precision - 1);
+    exp10++;
+  }
+
+  final d = digits.toString();
+  String withFraction(String whole, String fraction) {
+    final trimmed = fraction.replaceFirst(RegExp(r'0+$'), '');
+    return trimmed.isEmpty ? '$sign$whole' : '$sign$whole.$trimmed';
+  }
+
+  if (exp10 < -4 || exp10 >= precision) {
+    final e = exp10.abs().toString().padLeft(2, '0');
+    return '${withFraction(d[0], d.substring(1))}e${exp10 < 0 ? '-' : '+'}$e';
+  }
+  if (exp10 >= 0) {
+    return withFraction(d.substring(0, exp10 + 1), d.substring(exp10 + 1));
+  }
+  return withFraction('0', '${'0' * (-exp10 - 1)}$d');
 }
 
 JinjaValue _slice(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
