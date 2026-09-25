@@ -1,9 +1,9 @@
-/// A Dart implementation of the Jinja templating language,
-library;
-
-/// ported from llama.cpp's minimal jinja implementation.
+/// A Jinja engine for LLM chat templates, ported from llama.cpp's
+/// `common/jinja`.
 ///
-/// Focused on zero-dependency and input marking for security.
+/// Values wrapped in [JinjaString.user] are marked as input and escaped when
+/// rendered.
+library;
 
 export 'src/parser.dart' show ParserException;
 export 'src/template.dart';
