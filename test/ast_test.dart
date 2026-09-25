@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dinja/ast.dart';
 import 'package:test/test.dart';
 
@@ -17,7 +19,7 @@ const _template = '''
 {{ (count | string) if count else 'none' }}
 ''';
 
-const _exportedSymbols = <Type>[
+const _exportedTypes = <Type>[
   ArrayLiteral,
   BinaryExpression,
   BreakStatement,
@@ -50,43 +52,64 @@ const _exportedSymbols = <Type>[
   TestExpression,
   TupleLiteral,
   UnaryExpression,
-  Lexer,
   LexerException,
-  LexerResult,
-  Token,
-  TokenType,
-  Parser,
   ParserException,
 ];
 
+const Program Function(String) _exportedFunction = parseTemplate;
+
+Set<String> _showClauseNames(String library) {
+  final directives = RegExp(
+    r"^export\s+'[^']+'([^;]*);",
+    multiLine: true,
+  ).allMatches(library).map((Match m) => m.group(1)!.trim()).toList();
+  expect(directives, isNotEmpty);
+  final names = <String>{};
+  for (final String combinators in directives) {
+    final Match? show = RegExp(r'^show\s+([\s\S]+)$').firstMatch(combinators);
+    expect(show, isNotNull, reason: 'export without a show clause');
+    names.addAll(show!.group(1)!.split(',').map((s) => s.trim()));
+  }
+  return names;
+}
+
+ParserException _parserError(String source) {
+  try {
+    parseTemplate(source);
+  } on ParserException catch (e) {
+    return e;
+  }
+  fail('parseTemplate accepted an invalid template');
+}
+
 void main() {
   group('package:dinja/ast.dart', () {
-    test('exports every symbol named in its show clauses', () {
-      expect(_exportedSymbols, hasLength(39));
-      expect(_exportedSymbols.toSet(), hasLength(_exportedSymbols.length));
-    });
+    test('exports exactly the census symbols', () {
+      expect(_exportedTypes.toSet(), hasLength(_exportedTypes.length));
 
-    test('exposes the lexer entry point', () {
-      final LexerResult lexed = Lexer(_template).tokenize();
-
-      expect(lexed.source, isNotEmpty);
-      expect(lexed.tokens, isNotEmpty);
-      expect(lexed.tokens.first, isA<Token>());
+      final census = <String>{
+        for (final Type type in _exportedTypes) '$type',
+        'parseTemplate',
+      };
+      expect(census, hasLength(35));
+      expect(_exportedFunction('{{ x }}'), isA<Program>());
       expect(
-        lexed.tokens.map((Token t) => t.type),
-        contains(TokenType.openStatement),
+        _showClauseNames(File('lib/ast.dart').readAsStringSync()),
+        equals(census),
       );
     });
 
-    test('exposes the parser entry point and a walkable Program', () {
-      final LexerResult lexed = Lexer(_template).tokenize();
-      final Program program = Parser(lexed.tokens, lexed.source).parse();
+    test('parseTemplate returns a walkable Program', () {
+      final Program program = parseTemplate(_template);
 
       expect(program.body, isNotEmpty);
 
       final seen = <Type>{};
+      final operators = <String>{};
       void visit(Statement node) {
         seen.add(node.runtimeType);
+        if (node is BinaryExpression) operators.add(node.op.value);
+        if (node is UnaryExpression) operators.add(node.op.value);
         if (node is Program) {
           node.body.forEach(visit);
         } else if (node is IfStatement) {
@@ -173,18 +196,35 @@ void main() {
           StringLiteral,
         ]),
       );
+      expect(operators, containsAll(<String>['==', '+', 'not']));
     });
 
-    test('exposes the lexer and parser exception types', () {
+    test('parseTemplate locates errors in a CRLF template', () {
+      final ParserException e = _parserError('{{ a }}\r\n\r\n  {{ 1 + }}\r\n');
+
+      expect(e.line, 3);
+      expect(e.col, 10);
+      expect(e.source, '{{ a }}\n\n  {{ 1 + }}');
+      expect(e.source.substring(e.pos), '}}');
+    });
+
+    test('parseTemplate locates errors in a template with a trailing '
+        'newline', () {
+      final ParserException e = _parserError('{{ a }}\n{% if %}\n');
+
+      expect(e.line, 2);
+      expect(e.col, 7);
+      expect(e.source, '{{ a }}\n{% if %}');
+      expect(e.source.substring(e.pos), '%}');
+    });
+
+    test('parseTemplate throws the exported exception types', () {
       expect(
-        () => Lexer('{{ "unterminated }}').tokenize(),
+        () => parseTemplate('{{ "unterminated }}'),
         throwsA(isA<LexerException>()),
       );
       expect(
-        () => Parser(
-          Lexer('{% if x %}no endif').tokenize().tokens,
-          '{% if x %}no endif',
-        ).parse(),
+        () => parseTemplate('{% if x %}no endif'),
         throwsA(isA<ParserException>()),
       );
     });

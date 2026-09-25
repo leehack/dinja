@@ -1,6 +1,6 @@
 ## Unreleased
 
-- Added `package:dinja/ast.dart`, exposing the lexer, parser and AST node types so template analysis can reach them without importing `src/`. `package:dinja/dinja.dart` is unchanged.
+- Added `package:dinja/ast.dart` for template analysis without importing `src/`: `parseTemplate`, which parses a template into a `Program`; the AST node types; and `LexerException` and `ParserException`. `package:dinja/dinja.dart` is unchanged.
 
 ## 1.0.0
 
