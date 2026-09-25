@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Rewrote the README and example around rendering a chat template, and updated the pubspec description and topics.
 - Fixed `lstrip_blocks` keeping the indentation before a `{%` or `{#` on the line after a block tag, as in `{% if x %}\n    {% set y = 1 %}`. It is now removed, as in llama.cpp and Jinja2. Qwen3-Coder, GLM-4.6, GLM-4.7-Flash, MiniMax-M2, Nemotron-3-Nano and Command R7B prompts no longer contain stray spaces.
 - Fixed `strftime_now` supporting only `%Y %m %d %H %M %S`. It now formats as llama.cpp does, with C `strftime` in the C locale as glibc implements it: every conversion (`%b`, `%B`, `%a`, `%c`, `%%` and the rest), flags and widths. Like llama.cpp, it throws without a string argument and when the result is empty or 100 bytes or longer.
 - Fixed macro keyword arguments binding by position, which rendered `greet(last='Smith', first='John')` with empty values and made `add(1, b=10)` throw. Arguments now bind positionally, then by name, then from defaults, as in llama.cpp and Jinja2, including `caller(...)` arguments in a `{% call %}` block. A missing required argument throws `Not enough arguments provided`, as in llama.cpp; an unknown keyword or a keyword repeating a positional argument throws, as in Jinja2.

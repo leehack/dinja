@@ -4,125 +4,144 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![codecov](https://codecov.io/gh/leehack/dinja/branch/main/graph/badge.svg)](https://codecov.io/gh/leehack/dinja)
 
-# Dinja
+# dinja
 
-A minimal, zero-dependency Jinja templating engine for Dart, ported from `llama.cpp`. Focused on security, efficiency, and input marking.
+dinja renders LLM chat templates in Dart: give it a model's Jinja chat template and a conversation, and it returns the prompt string. It is a port of llama.cpp's `common/jinja` engine.
 
-## Features
-
-- **Zero-Dependency**: No external dependencies beyond the Dart SDK.
-- **Security-First**: Built with specific "Input Marking" to prevent injection attacks when rendering user input.
-- **Lightweight**: Ported from `llama.cpp`'s minimal Jinja implementation.
-- **Chat Template Support**: Specifically designed to faithfully render the complex chat templates used in LLM inference (e.g., Mistral, Llama 3).
-
-## Scope
-
-This project is a **minimal** implementation of Jinja2. It does *not* support the full Jinja2 specification (e.g., custom tags, complex inheritance hierarchies, or filesystem loading are out of scope).
-
-The primary goal is to support **LLM Chat Templates** and basic string rendering efficiently and securely in Dart.
-
-## Security: Input Marking
-
-Dinja uses a taint-tracking mechanism similar to `MarkupSafe` in Python but adapted for this specific use case.
-
-- **`JinjaString`**: A wrapper around strings that tracks which parts come from the template (safe) and which come from user input (unsafe).
-- **Automatic Escaping**: values wrapped in `JinjaString.user(...)` are escaped when rendered, while template structure remains untouched. A plain `String` is treated as template text and is not escaped.
-
-```dart
-final template = Template('Hello {{ name }}');
-final result = template.render({
-  'name': JinjaString.user('<script>alert(1)</script>'),
-});
-// Output: Hello &lt;script&gt;alert(1)&lt;/script&gt;
-
-template.render({'name': '<script>alert(1)</script>'});
-// Output: Hello <script>alert(1)</script>
+```bash
+dart pub add dinja
 ```
 
-## Getting started
-
-Add `dinja` to your `pubspec.yaml`:
-
-```yaml
-dependencies:
-  dinja: ^1.1.0
-```
-
-## Usage
-
-### Simple Rendering
+## Render a chat template
 
 ```dart
 import 'package:dinja/dinja.dart';
 
-void main() {
-  final template = Template('Hello, {{ name }}!');
-  final result = template.render({'name': 'World'});
-  print(result); // Hello, World!
-}
-```
-
-### Complex Templates
-
-```dart
-import 'package:dinja/dinja.dart';
-
-void main() {
-  final templateText = '''
-{% for user in users %}
-- {{ user.name }} ({{ user.role }})
-{% endfor %}
+// A trimmed Qwen2.5-style ChatML template.
+const chatTemplate = r'''
+{%- if tools %}
+    {{- '<|im_start|>system\n' + messages[0].content + '\n\n# Tools\n\n<tools>' }}
+    {%- for tool in tools %}
+        {{- '\n' + tool | tojson }}
+    {%- endfor %}
+    {{- '\n</tools><|im_end|>\n' }}
+{%- else %}
+    {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
+{%- endif %}
+{%- for message in messages[1:] %}
+    {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+{%- endif %}
 ''';
-  final template = Template(templateText);
-  final users = [
-    {'name': 'Alice', 'role': 'Admin'},
-    {'name': 'Bob', 'role': 'User'},
-  ];
-  final result = template.render({'users': users});
-  print(result);
+
+void main() {
+  final prompt = Template(chatTemplate).render({
+    'messages': [
+      {'role': 'system', 'content': 'You are a helpful assistant.'},
+      {'role': 'user', 'content': 'What is the weather in Paris?'},
+    ],
+    'tools': [
+      {
+        'type': 'function',
+        'function': {
+          'name': 'get_weather',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'city': {'type': 'string'},
+            },
+          },
+        },
+      },
+    ],
+    'add_generation_prompt': true,
+  });
+  print(prompt);
 }
 ```
 
-### Rendering Chat Templates
+Output, identical to what llama.cpp and Python Jinja2 render:
 
-Dinja is optimized for rendering chat templates (like those found in `tokenizer_config.json` for HuggingFace models).
+```text
+<|im_start|>system
+You are a helpful assistant.
+
+# Tools
+
+<tools>
+{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}
+</tools><|im_end|>
+<|im_start|>user
+What is the weather in Paris?<|im_end|>
+<|im_start|>assistant
+
+```
+
+Real templates come from the `chat_template` field of a model's `tokenizer_config.json` on huggingface.co, or from the `tokenizer.chat_template` key in GGUF metadata. Pass that string to `Template` unchanged.
+
+## Why dinja
+
+- **llama.cpp parity.** dinja follows `common/jinja`, the engine llama-server renders chat templates with. llama.cpp's Jinja test suite, 290 cases whose expected output also matches Python Jinja2 3.1.6, is ported case for case: dinja matches all 279 cases that llama.cpp runs byte for byte. The other 11 are cases llama.cpp skips as not implemented.
+- **Real templates.** The tests parse and render 45 distinct chat templates from real models, including Llama 3.x, Qwen2.5, Qwen3, Mistral, Gemma, DeepSeek R1, Phi, gpt-oss, Kimi K2 and GLM.
+- **Input marking.** Values wrapped in `JinjaString.user` are escaped on output, and `renderJinjaResult` reports which parts of the output came from input.
+- **Web and Wasm.** Pure Dart, depending only on `meta`. The parser, runtime and llama.cpp tests also pass in Chrome, compiled to JavaScript and to Wasm.
+- **Used by [llamadart](https://pub.dev/packages/llamadart)**, a llama.cpp runtime for Dart and Flutter, to render chat templates.
+
+## Input marking
+
+Wrap untrusted values in `JinjaString.user`. They are escaped when rendered; a plain `String` is treated as template text and is not.
 
 ```dart
 import 'package:dinja/dinja.dart';
 
 void main() {
-  // A simplified Mistral-like template
-  final templateSrc = "{{ bos_token }}{% for m in messages %}[INST] {{ m['content'] }} [/INST]{% endfor %}";
-  final template = Template(templateSrc);
+  final template = Template('Hello {{ name }}');
+  const html = '<script>alert(1)</script>';
+  print(template.render({'name': JinjaString.user(html)}));
+  print(template.render({'name': html}));
 
-  final output = template.render({
-    'bos_token': '<s>',
-    'messages': [
-      {'role': 'user', 'content': 'Hello!'},
-      {'role': 'user', 'content': 'What is the capital of France?'}
-    ]
-  });
-
-  print(output);
-  // Output: <s>[INST] Hello! [/INST][INST] What is the capital of France? [/INST]
+  final result = template.renderJinjaResult({'name': JinjaString.user('Bob')});
+  print(result.parts.where((part) => part.isInput).map((part) => part.val));
 }
 ```
 
-### Analyzing Templates
+```text
+Hello &lt;script&gt;alert(1)&lt;/script&gt;
+Hello <script>alert(1)</script>
+(Bob)
+```
 
-`package:dinja/ast.dart` parses a template into an AST without rendering it, for tools that inspect templates (for example, to detect which features a chat template uses).
+## Analyzing templates
+
+`package:dinja/ast.dart` parses a template into an AST without rendering it, for tools that inspect templates, for example to detect which features a chat template uses.
 
 ```dart
 import 'package:dinja/ast.dart';
 
 void main() {
-  final program = parseTemplate('{% if tools %}{{ tools | length }}{% endif %}');
+  final program = parseTemplate(
+    '{% if tools %}{{ tools | length }}{% endif %}',
+  );
   for (final statement in program.body) {
-    print(statement.type); // If
+    print(statement.type);
   }
 }
 ```
 
-## Additional information
+```text
+If
+```
 
-This package is a direct port of the minimal Jinja implementation found in `llama.cpp`. It aims to provide the same functionality while adhering to Dart best practices.
+## dinja and package:jinja
+
+[jinja](https://pub.dev/packages/jinja) ports Jinja as a general-purpose, server-side template engine with template inheritance. dinja targets LLM chat templates: it tracks llama.cpp's engine and output, adds input marking, and leaves out inheritance and template loading.
+
+## Scope
+
+dinja implements the Jinja that chat templates use, not all of Jinja2:
+
+- A template is a single string: `extends`, `block`, `include`, `import`, `raw` and `with` throw a `ParserException`.
+- Plain strings are never escaped; only `JinjaString.user` values are.
+- Some Jinja2 features llama.cpp lacks are missing here too; for example, `'%s'|format(x)` returns `%s`.
