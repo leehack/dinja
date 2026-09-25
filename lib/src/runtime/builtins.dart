@@ -634,27 +634,26 @@ JinjaValue _unique(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final attribute =
       kwargs['attribute']?.toString() ??
       (args.length > 1 ? args[1].toString() : null);
-  final caseSensitive = kwargs['case_sensitive']?.asBool ?? true;
+  final caseSensitive = kwargs['case_sensitive']?.asBool ?? false;
 
-  final items = collection is JinjaList
-      ? collection.items
-      : (collection as JinjaTuple).items;
+  return JinjaList(_uniqueItems(collection.asList, caseSensitive, attribute));
+}
 
-  final seen = <String, JinjaValue>{};
+List<JinjaValue> _uniqueItems(
+  List<JinjaValue> items,
+  bool caseSensitive,
+  String? attribute,
+) {
+  final seen = <JinjaValue>{};
   final result = <JinjaValue>[];
-
   for (final item in items) {
-    final val = attribute != null ? _resolveAttribute(item, attribute) : item;
-    String key = val.toString();
-    if (!caseSensitive) {
-      key = key.toLowerCase();
+    var key = attribute != null ? _resolveAttribute(item, attribute) : item;
+    if (!caseSensitive && key is JinjaStringValue) {
+      key = JinjaStringValue.fromString(key.value.toString().toLowerCase());
     }
-    if (!seen.containsKey(key)) {
-      seen[key] = item;
-      result.add(item);
-    }
+    if (seen.add(key)) result.add(item);
   }
-  return JinjaList(result);
+  return result;
 }
 
 JinjaValue _reverse(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -1230,23 +1229,7 @@ JinjaValue? _resolveListMember(JinjaList obj, String name) {
             kwargs['attribute']?.toString() ??
             (args.isNotEmpty ? args[0].toString() : null);
         final caseSensitive = kwargs['case_sensitive']?.asBool ?? true;
-
-        final seen = <String, JinjaValue>{};
-        final result = <JinjaValue>[];
-
-        for (final item in obj.items) {
-          final val = attribute != null
-              ? _resolveAttribute(item, attribute)
-              : item;
-          String key = val.toString();
-          if (!caseSensitive) key = key.toLowerCase();
-
-          if (!seen.containsKey(key)) {
-            seen[key] = item;
-            result.add(item);
-          }
-        }
-        return JinjaList(result);
+        return JinjaList(_uniqueItems(obj.items, caseSensitive, attribute));
       });
   }
   return null;
