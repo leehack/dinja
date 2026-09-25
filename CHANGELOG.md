@@ -1,4 +1,4 @@
-## Unreleased
+## 1.2.0
 
 - Rewrote the README and example around rendering a chat template, and updated the pubspec description and topics.
 - Fixed `lstrip_blocks` keeping the indentation before a `{%` or `{#` on the line after a block tag, as in `{% if x %}\n    {% set y = 1 %}`. It is now removed, as in llama.cpp and Jinja2. Qwen3-Coder, GLM-4.6, GLM-4.7-Flash, MiniMax-M2, Nemotron-3-Nano and Command R7B prompts no longer contain stray spaces.
