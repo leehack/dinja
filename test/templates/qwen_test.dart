@@ -121,5 +121,53 @@ void main() {
       expect(output, contains('Tool result'));
       expect(output, contains('</tool_response>'));
     });
+
+    test(
+      'Qwen3 omits the think block of an earlier tool-call turn with empty reasoning',
+      () {
+        final source = File(
+          'test/fixtures/templates/Qwen3-4B.jinja',
+        ).readAsStringSync();
+        final data = {
+          'messages': [
+            {'role': 'user', 'content': 'What is the weather in Paris?'},
+            {
+              'role': 'assistant',
+              'content': '',
+              'reasoning_content': '',
+              'tool_calls': [
+                {
+                  'id': 'call_1',
+                  'type': 'function',
+                  'function': {
+                    'name': 'get_weather',
+                    'arguments': '{"city": "Paris"}',
+                  },
+                },
+              ],
+            },
+            {
+              'role': 'tool',
+              'tool_call_id': 'call_1',
+              'content': '{"temperature": 21}',
+            },
+          ],
+          'add_generation_prompt': true,
+        };
+
+        expect(
+          Template(source).render(data),
+          equals(
+            '<|im_start|>user\nWhat is the weather in Paris?<|im_end|>\n'
+            '<|im_start|>assistant\n<tool_call>\n'
+            '{"name": "get_weather", "arguments": {"city": "Paris"}}\n'
+            '</tool_call><|im_end|>\n'
+            '<|im_start|>user\n<tool_response>\n{"temperature": 21}\n'
+            '</tool_response><|im_end|>\n'
+            '<|im_start|>assistant\n',
+          ),
+        );
+      },
+    );
   });
 }

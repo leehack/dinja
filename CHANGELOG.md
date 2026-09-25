@@ -1,3 +1,7 @@
+## Unreleased
+
+- Fixed string equality to compare content only: `''.strip() == ''` is now true, and `safe` or input-marked strings equal plain ones.
+
 ## 1.0.0
 
 - Initial release of Dinja.
