@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:test/test.dart';
 import 'package:dinja/dinja.dart';
 import 'package:dinja/src/ast/nodes.dart';
@@ -437,5 +439,39 @@ void main() {
         expect(e.toString(), contains('Unknown test: unknown_check'));
       }
     });
+  });
+
+  group('For loop over a non-iterable', () {
+    const cases = <String, String>{
+      '{% for x in range %}{% endfor %}': "got Function 'range'",
+      '{% for k, v in m.items %}{% endfor %}': "got Function 'items'",
+      '{% for x in 1 %}{% endfor %}': 'got Integer',
+    };
+
+    for (final c in cases.entries) {
+      test('${c.key} prints nothing and throws ${c.value}', () {
+        final printed = <String>[];
+        Object? error;
+        runZoned(
+          () {
+            try {
+              Template(c.key).render({
+                'm': {'a': 1},
+              });
+            } catch (e) {
+              error = e;
+            }
+          },
+          zoneSpecification: ZoneSpecification(
+            print: (self, parent, zone, line) => printed.add(line),
+          ),
+        );
+        expect(printed, isEmpty);
+        expect(
+          error.toString(),
+          equals('Exception: Expected iterable in for loop: ${c.value}'),
+        );
+      });
+    }
   });
 }

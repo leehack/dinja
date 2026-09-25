@@ -1,6 +1,8 @@
 ## Unreleased
 
 - Added `package:dinja/ast.dart` for template analysis without importing `src/`: `parseTemplate`, which parses a template into a `Program`; the AST node types; and `LexerException` and `ParserException`. `package:dinja/dinja.dart` is unchanged.
+- Fixed string equality to compare content only: `''.strip() == ''` is now true, and `safe` or input-marked strings equal plain ones.
+- Removed a debug `print` to stdout when a `for` loop iterates a function; the error now names the function.
 
 ## 1.0.0
 
