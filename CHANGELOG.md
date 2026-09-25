@@ -1,4 +1,4 @@
-## Unreleased
+## 1.1.1
 
 - Fixed macro keyword arguments binding by position, which rendered `greet(last='Smith', first='John')` with empty values and made `add(1, b=10)` throw. Arguments now bind positionally, then by name, then from defaults, as in llama.cpp and Jinja2, including `caller(...)` arguments in a `{% call %}` block. A missing required argument throws `Not enough arguments provided`, as in llama.cpp; an unknown keyword or a keyword repeating a positional argument throws, as in Jinja2.
 - Fixed unary `-` and `+` failing to parse before anything but a number literal, as in `{{ -n }}`, `{{ items[:-n] }}` and `{{ not -n }}`. As in llama.cpp and Jinja2, they bind tighter than filters, tests and `**`: `-n|abs` is `(-n)|abs`.
