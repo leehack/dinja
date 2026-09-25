@@ -67,11 +67,17 @@ class Parser {
   // Helper methods
 
   Token peek([int offset = 0]) {
-    if (current + offset >= tokens.length) {
-      return const Token(TokenType.eof, '', -1, -1, -1);
-    }
+    if (current + offset >= tokens.length) return _endOfInput;
     return tokens[current + offset];
   }
+
+  late final Token _endOfInput = Token(
+    TokenType.eof,
+    '',
+    source.length,
+    '\n'.allMatches(source).length + 1,
+    source.length - source.lastIndexOf('\n'),
+  );
 
   Token expect(TokenType type, String error) {
     final t = peek();
@@ -592,10 +598,37 @@ class Parser {
       var testId = parsePrimaryExpression();
       if (isType(TokenType.openParen)) {
         testId = parseCallExpression(testId);
+      } else if (_startsTestArgument()) {
+        testId = CallExpression(testId.pos, testId, [
+          parseCallMemberExpression(),
+        ]);
       }
       operand = TestExpression(startPos, operand, negate, testId);
     }
     return operand;
+  }
+
+  bool _startsTestArgument() {
+    final t = peek();
+    switch (t.type) {
+      case TokenType.identifier:
+        return !const {
+          'else',
+          'or',
+          'and',
+          'if',
+          'in',
+          'is',
+          'not',
+        }.contains(t.value);
+      case TokenType.stringLiteral:
+      case TokenType.numericLiteral:
+      case TokenType.openSquareBracket:
+      case TokenType.openCurlyBracket:
+        return true;
+      default:
+        return false;
+    }
   }
 
   Expression parseFilterExpression() {

@@ -124,6 +124,34 @@ void main() {
       );
     });
 
+    group('unique compares with Python equality', () {
+      // Expected values are Jinja2 3.1.6 output.
+      for (final (source, expected) in [
+        ("{{ [1, '1'] | unique | list | length }}", '2'),
+        ("{{ [1, 2, 1, '2'] | unique | join(',') }}", '1,2,2'),
+        ("{{ (1, '1', 1) | unique | list | length }}", '2'),
+        ("{{ [1.5, 1.5, '1.5'] | unique | list | length }}", '2'),
+        ("{{ [none, none, 'None'] | unique | list | length }}", '2'),
+        ("{{ [1, 1.0, true] | unique | join(',') }}", '1'),
+        ("{{ [true, 1, 1.0] | unique | join(',') }}", 'True'),
+        ('{{ [0, false, 0.0] | unique | list | length }}', '1'),
+        ("{{ ['a', 'A', 'b'] | unique | join('') }}", 'ab'),
+        (
+          "{{ ['a', 'A', 'b'] | unique(case_sensitive=true) | join('') }}",
+          'aAb',
+        ),
+        (
+          "{{ [{'n': 'a'}, {'n': 'A'}, {'n': 1}, {'n': '1'}] "
+              "| unique(attribute='n') | map(attribute='n') | join(',') }}",
+          'a,1,1',
+        ),
+      ]) {
+        test(source, () {
+          expect(Template(source).render(), expected);
+        });
+      }
+    });
+
     test('replace filter', () {
       expect(
         Template("{{ 'hello' | replace('l', 'w') }}").render({}),
@@ -169,6 +197,13 @@ void main() {
         "{{ ['a', 'A', 'b'] | unique(case_sensitive=false) | join('') }}",
       ).render({});
       expect(uniqueResult, equals('ab'));
+    });
+
+    test('unique method compares with Python equality', () {
+      expect(
+        Template("{{ [1, '1', 1.0].unique() | join(',') }}").render(),
+        equals('1,1'),
+      );
     });
   });
 
