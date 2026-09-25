@@ -29,6 +29,19 @@ class ParserException implements Exception {
   }
 }
 
+/// Parses the Jinja template [source] into a [Program] without rendering it.
+///
+/// Before parsing, `\r\n` and `\r` become `\n` and one trailing newline is
+/// removed. Positions in the result and in a thrown exception refer to that
+/// normalized text, which is also the exception's `source`.
+///
+/// Throws a [LexerException] if [source] cannot be tokenized, or a
+/// [ParserException] if its tokens do not form a valid template.
+Program parseTemplate(String source) {
+  final lexed = Lexer(source).tokenize();
+  return Parser(lexed.tokens, lexed.source).parse();
+}
+
 /// The parser responsible for building an AST from a stream of [Token]s.
 class Parser {
   /// The list of tokens to parse.
