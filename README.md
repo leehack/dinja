@@ -145,4 +145,4 @@ dinja implements the Jinja that chat templates use, not all of Jinja2:
 - A template is a single string: `extends`, `block`, `include`, `import`, `raw` and `with` throw a `ParserException`.
 - Plain strings are never escaped; only `JinjaString.user` values are.
 - Some Jinja2 features llama.cpp lacks are missing here too; for example, `'%s'|format(x)` returns `%s`.
-- `strftime_now` formats the system clock's current time in the local time zone, as C `strftime` does in llama.cpp.
+- `strftime_now` formats the system clock's current time in the local time zone, as C `strftime` does in llama.cpp. `%Z` is Dart's `DateTime.timeZoneName`, whose format depends on the platform: on the web it is the browser's name for the zone, such as `Eastern Daylight Time` where llama.cpp gives `EDT`.

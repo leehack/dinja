@@ -750,4 +750,87 @@ void main() {
       );
     });
   });
+
+  group('Loop controls in captured output', () {
+    // llama.cpp 7fe450e1 and Jinja2 3.1.6 give each of these outputs.
+    const cases = {
+      '{% for i in [1, 2] %}{% set s %}a{{ i }}{% continue %}{% endset %}[{{ s }}]{% endfor %}':
+          '',
+      '{% for i in [1, 2] %}{% set s %}a{{ i }}{% break %}{% endset %}[{{ s }}]{% endfor %}':
+          '',
+      '{% for i in [1, 2] %}b{% set s %}a{{ i }}{% continue %}{% endset %}[{{ s }}]{% endfor %}':
+          'bb',
+      '{% for i in [1, 2] %}{% filter upper %}a{{ i }}{% continue %}{% endfilter %}|{% endfor %}':
+          '',
+      '{% for i in [1, 2] %}b{% filter upper %}a{{ i }}{% continue %}{% endfilter %}|{% endfor %}':
+          'bb',
+      '{% for i in [1, 2] %}{% filter upper %}a{{ i }}{% break %}{% endfilter %}|{% endfor %}':
+          '',
+      '{% set s %}{% for i in [1, 2] %}{{ i }}{% continue %}{% endfor %}{% endset %}[{{ s }}]':
+          '[12]',
+      '{% filter upper %}{% for i in [1, 2] %}a{{ i }}{% continue %}{% endfor %}{% endfilter %}':
+          'A1A2',
+    };
+    cases.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render(), expected);
+      });
+    });
+
+    // llama.cpp 7fe450e1 output. Jinja2 rejects `break` and `continue`
+    // outside a loop in the same macro or call body.
+    const llamaCases = {
+      '{% macro m() %}a{% continue %}{% endmacro %}{% for i in [1, 2] %}{{ m() }}|{% endfor %}':
+          '',
+      '{% macro m() %}a{% continue %}{% endmacro %}{% for i in [1, 2] %}b{{ m() }}|{% endfor %}':
+          'bb',
+      '{% macro m() %}a{% break %}{% endmacro %}{% for i in [1, 2] %}b{{ m() }}|{% endfor %}':
+          'b',
+      '{% macro w() %}[{{ caller() }}]{% endmacro %}'
+              '{% for i in [1, 2] %}{% call w() %}a{{ i }}{% continue %}{% endcall %}|{% endfor %}':
+          '',
+      '{% macro w() %}[{{ caller() }}]{% endmacro %}'
+              '{% for i in [1, 2] %}b{% call w() %}a{{ i }}{% continue %}{% endcall %}|{% endfor %}':
+          'bb',
+    };
+    llamaCases.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render(), expected);
+      });
+    });
+
+    // Jinja2 3.1.6 output. llama.cpp 7fe450e1 drops the inner loop's output
+    // when its else block ends in `break` or `continue`, as it does for any
+    // nested block.
+    const elseCases = {
+      '{% for i in [1, 2] %}{% for j in [1] %}a{% continue %}{% else %}x{% continue %}{% endfor %}|{% endfor %}':
+          'axax',
+      '{% for i in [1, 2] %}{% for j in [1] %}a{% continue %}{% else %}x{% break %}{% endfor %}|{% endfor %}':
+          'ax',
+      '{% for i in [1, 2] %}{% for j in [] %}a{% else %}x{% continue %}{% endfor %}|{% endfor %}':
+          'xx',
+    };
+    elseCases.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render(), expected);
+      });
+    });
+  });
+
+  group('Input marking in loops', () {
+    final values = {'x': JinjaString.user('<b>')};
+    for (final source in [
+      '{% for i in [] %}{% else %}{{ x }}{% endfor %}',
+      '{% for i in [1] %}{{ x }}{% endfor %}',
+      '{% for i in [1] %}{% for j in [1] %}{{ x }}{% endfor %}{% endfor %}',
+      '{% for i in [1] %}{{ x }}{% continue %}{% endfor %}',
+      '{% if true %}{% for i in [1] %}{{ x }}{% endfor %}{% endif %}',
+      '{% set s %}{% for i in [1] %}{{ x }}{% endfor %}{% endset %}{{ s }}',
+      '{% macro m() %}{% for i in [1] %}{{ x }}{% endfor %}{% endmacro %}{{ m() }}',
+    ]) {
+      test('escapes once in $source', () {
+        expect(Template(source).render(values), '&lt;b&gt;');
+      });
+    }
+  });
 }

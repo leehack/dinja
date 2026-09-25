@@ -97,6 +97,18 @@ JinjaValue execStatements(List<Statement> stmts, Context ctx) {
   return JinjaStringValue(JinjaString(parts, isSafe: true));
 }
 
+/// Executes [stmts] whose output is captured rather than printed, as in a
+/// block `set`, a `filter` block, a macro or a `caller()` body. A `break` or
+/// `continue` leaving the body discards the captured output, as in llama.cpp.
+JinjaValue _execCaptured(List<Statement> stmts, Context ctx) {
+  try {
+    return execStatements(stmts, ctx);
+  } on LoopSignal catch (signal) {
+    signal.parts.clear();
+    rethrow;
+  }
+}
+
 /// Represents a conditional 'if' block.
 class IfStatement extends Statement {
   /// The condition expression to evaluate.
@@ -256,10 +268,17 @@ class ForStatement extends Statement {
     }
 
     if (!iterated) {
-      final result = execStatements(defaultBlock, ctx);
-      if (result is JinjaStringValue) parts.addAll(result.value.parts);
+      try {
+        final result = execStatements(defaultBlock, ctx);
+        if (result is JinjaStringValue) parts.addAll(result.value.parts);
+      } on LoopSignal catch (signal) {
+        // A `break` or `continue` in the else block belongs to an enclosing
+        // loop and keeps the output of this one, as in Jinja2.
+        signal.parts.insertAll(0, parts);
+        rethrow;
+      }
     }
-    return JinjaStringValue(JinjaString(parts));
+    return JinjaStringValue(JinjaString(parts, isSafe: true));
   }
 
   void _bindLoopVar(Context ctx, Expression loopVar, JinjaValue item) {
@@ -334,7 +353,7 @@ class SetStatement extends Statement {
       rhs = value!.execute(ctx);
     } else {
       // Block set: capture output of body
-      rhs = execStatements(body, ctx);
+      rhs = _execCaptured(body, ctx);
     }
 
     if (assignee is Identifier) {
@@ -408,7 +427,7 @@ class MacroStatement extends Statement {
         macroCtx.set('caller', callKwargs['caller']!);
       }
 
-      return execStatements(body, macroCtx);
+      return _execCaptured(body, macroCtx);
     });
 
     ctx.set(macroName, func);
@@ -503,7 +522,7 @@ class CallStatement extends Statement {
         callerCtx,
         ctx,
       );
-      return execStatements(body, callerCtx);
+      return _execCaptured(body, callerCtx);
     });
 
     final callExpr = call;
@@ -547,7 +566,7 @@ class FilterStatement extends Statement {
   @override
   JinjaValue execute(Context ctx) {
     // Execute body
-    final bodyResult = execStatements(body, ctx);
+    final bodyResult = _execCaptured(body, ctx);
     // Apply filter to body result (as string usually)
 
     final result = FilterExpression(

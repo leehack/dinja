@@ -4,6 +4,10 @@
 /// Supports glibc's conversions, the `E` and `O` modifiers, the `_`, `-`,
 /// `0`, `^` and `#` flags and field widths. An unknown conversion is copied
 /// to the output, as glibc does.
+///
+/// `%Z` is [DateTime.timeZoneName], whose format depends on the platform: on
+/// the web it is the browser's name for the zone, such as
+/// `Eastern Daylight Time` where glibc gives `EDT`.
 String strftime(String format, DateTime time) => _Strftime(format, time).run();
 
 const _weekdays = [
