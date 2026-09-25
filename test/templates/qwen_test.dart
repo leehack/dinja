@@ -105,14 +105,19 @@ void main() {
 
       final output = template.render(data);
       // Check system prompt injection of tools
-      expect(output, contains('<tools>'));
-      expect(output, contains('my_tool'));
+      expect(
+        output,
+        contains(
+          '<tools>\n{"type": "function", "function": {"name": "my_tool", '
+          '"description": "desc", "parameters": {}}}\n</tools>',
+        ),
+      );
 
       // Check assistant tool call
       expect(output, contains('<|im_start|>assistant'));
       expect(output, contains('<tool_call>'));
       expect(output, contains('"name": "my_tool"'));
-      expect(output, contains('"arguments": {"a":1}'));
+      expect(output, contains('"arguments": {"a": 1}'));
       expect(output, contains('</tool_call>'));
 
       // Check tool response (wrapped in user role)

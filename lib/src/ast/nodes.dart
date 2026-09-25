@@ -1,5 +1,6 @@
 import '../types/value.dart';
 import '../types/jinja_string.dart';
+import '../types/repr.dart';
 import 'dart:math' as math;
 import '../runtime/context.dart';
 import '../runtime/builtins.dart';
@@ -81,16 +82,7 @@ JinjaValue execStatements(List<Statement> stmts, Context ctx) {
           }
         }
       } else if (!val.isNone && !val.isUndefined) {
-        // Convert to string and escape it
-        String s = val.toString();
-        // Manually escape the string s
-        final escapedS = s
-            .replaceAll('&', '&amp;')
-            .replaceAll('<', '&lt;')
-            .replaceAll('>', '&gt;')
-            .replaceAll('"', '&quot;')
-            .replaceAll("'", '&#39;');
-        parts.add(JinjaStringPart(escapedS, false));
+        parts.addAll(reprOf(val).escape().parts);
       }
     }
   } catch (e) {

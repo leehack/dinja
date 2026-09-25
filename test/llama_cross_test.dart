@@ -697,7 +697,7 @@ void main() {
       final Map<String, dynamic> data = {
         "data": {"b": 2, "a": 1},
       };
-      expect(template.render(data), equals('{"a":1,"b":2}'));
+      expect(template.render(data), equals('{"a": 1, "b": 2}'));
     });
 
     test('tojson', () {
@@ -708,7 +708,7 @@ void main() {
           "b": [1, 2],
         },
       };
-      expect(template.render(data), equals('{"a":1,"b":[1,2]}'));
+      expect(template.render(data), equals('{"a": 1, "b": [1, 2]}'));
     });
 
     test('tojson indent=4', () {
@@ -1351,7 +1351,7 @@ void main() {
       final Map<String, dynamic> data = {
         "arr": [1, 2, 3],
       };
-      expect(template.render(data), equals('[1,2,3]'));
+      expect(template.render(data), equals('[1, 2, 3]'));
     });
 
     test('array|tojson with strings', () {
@@ -1359,7 +1359,7 @@ void main() {
       final Map<String, dynamic> data = {
         "arr": ["a", "b", "c"],
       };
-      expect(template.render(data), equals('["a","b","c"]'));
+      expect(template.render(data), equals('["a", "b", "c"]'));
     });
 
     test('array|tojson nested', () {
@@ -1370,7 +1370,7 @@ void main() {
           [3, 4],
         ],
       };
-      expect(template.render(data), equals('[[1,2],[3,4]]'));
+      expect(template.render(data), equals('[[1, 2], [3, 4]]'));
     });
 
     test('array|last', () {
@@ -1752,7 +1752,7 @@ void main() {
       final Map<String, dynamic> data = {
         "obj": {"name": "test", "value": 42},
       };
-      expect(template.render(data), equals('{"name":"test","value":42}'));
+      expect(template.render(data), equals('{"name": "test", "value": 42}'));
     });
 
     test('nested object|tojson', () {
@@ -1762,7 +1762,7 @@ void main() {
           "outer": {"inner": "value"},
         },
       };
-      expect(template.render(data), equals('{"outer":{"inner":"value"}}'));
+      expect(template.render(data), equals('{"outer": {"inner": "value"}}'));
     });
 
     test('array in object|tojson', () {
@@ -1772,7 +1772,7 @@ void main() {
           "items": [1, 2, 3],
         },
       };
-      expect(template.render(data), equals('{"items":[1,2,3]}'));
+      expect(template.render(data), equals('{"items": [1, 2, 3]}'));
     });
 
     test('object attribute and key access', () {

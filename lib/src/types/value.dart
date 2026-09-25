@@ -1,6 +1,7 @@
 import 'package:meta/meta.dart';
 
 import 'jinja_string.dart';
+import 'repr.dart';
 
 /// Base class for all runtime values under the Dinja type system.
 @immutable
@@ -261,7 +262,7 @@ class JinjaStringValue extends JinjaValue {
   bool get isString => true;
 
   @override
-  String get asRepr => "'${value.toString().replaceAll("'", "\\'")}'";
+  String get asRepr => reprOf(this).toString();
 
   @override
   bool get isSafe => value.isSafe;
@@ -319,9 +320,7 @@ class JinjaList extends JinjaValue {
   }
 
   @override
-  String toString() {
-    return '[${items.map((e) => e.asRepr).join(', ')}]';
-  }
+  String toString() => reprOf(this).toString();
 
   @override
   Object? toDart() => items.map((e) => e.toDart()).toList();
@@ -374,22 +373,24 @@ class JinjaMap extends JinjaValue {
   }
 
   @override
-  String toString() {
-    return '{${items.entries.map((e) => '${e.key.asRepr}: ${e.value.asRepr}').join(', ')}}';
-  }
+  String toString() => reprOf(this).toString();
 
   @override
   Object? toDart() => items.map((k, v) => MapEntry(k.toDart(), v.toDart()));
 }
 
-// Helper to create values easily
+/// Converts a Dart value to a [JinjaValue].
+///
+/// On the web a whole-number `double` is also an `int`, so it becomes a
+/// [JinjaInteger], except `-0.0` and values outside the 64-bit integer range,
+/// which only a `double` can hold on the VM.
 JinjaValue val(Object? v) {
   if (v == null) return const JinjaNone();
   if (v is JinjaValue) return v;
   if (v is JinjaString) return JinjaStringValue(v);
   if (v is bool) return JinjaBoolean(v);
-  if (v is int) return JinjaInteger(v);
-  if (v is double) return JinjaFloat(v);
+  if (v is int && !_isWebOnlyDouble(v)) return JinjaInteger(v);
+  if (v is num) return JinjaFloat(v.toDouble());
   if (v is String) return JinjaStringValue.fromString(v);
   if (v is List) {
     return JinjaList(v.map(val).toList());
@@ -438,9 +439,7 @@ class JinjaTuple extends JinjaValue {
   }
 
   @override
-  String toString() {
-    return '(${items.map((e) => e.asRepr).join(', ')})';
-  }
+  String toString() => reprOf(this).toString();
 
   @override
   Object? toDart() => items.map((e) => e.toDart()).toList();
@@ -491,3 +490,7 @@ class JinjaFunction extends JinjaValue {
   @override
   Object? toDart() => null; // Functions cannot be converted to Dart objects easily
 }
+
+bool _isWebOnlyDouble(int v) =>
+    identical(0, 0.0) &&
+    (v == 0 && v.isNegative || v.abs() >= 9223372036854775808.0);
