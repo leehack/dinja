@@ -1,4 +1,3 @@
-import 'lexer.dart';
 import 'parser.dart';
 import 'ast/nodes.dart';
 import 'runtime/context.dart';
@@ -15,15 +14,10 @@ class Template {
   /// Creates a [Template] from the given [source] string.
   ///
   /// The source is immediately lexed and parsed.
-  /// Throws a [ParserException] if the template syntax is invalid.
-  Template(this.source) : _ast = _parse(source);
-
-  static Program _parse(String source) {
-    final lexer = Lexer(source);
-    final lexerResult = lexer.tokenize();
-    final parser = Parser(lexerResult.tokens, source);
-    return parser.parse();
-  }
+  /// Throws a [ParserException] if the template syntax is invalid. Its
+  /// `source` and positions refer to [source] with `\r\n` and `\r` replaced
+  /// by `\n` and one trailing newline removed.
+  Template(this.source) : _ast = parseTemplate(source);
 
   /// Renders the template with the given context.
   ///

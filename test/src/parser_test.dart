@@ -98,6 +98,10 @@ void main() {
       ('{% set x %}abc', 1, 15),
       ('{% macro m() %}x', 1, 17),
       ('{{ x', 1, 5),
+      ('{{ 1 +', 1, 7),
+      ('{{ f(', 1, 6),
+      ('{{ [1,', 1, 7),
+      ('{{ x is', 1, 8),
     ]) {
       test('end of input in ${source.replaceAll('\n', r'\n')}', () {
         final e = _parserError(source);
@@ -106,6 +110,41 @@ void main() {
         expect(e.col, col);
       });
     }
+
+    test('every prefix of a template fails with a positioned exception', () {
+      const source =
+          "{% macro m(a, b=[1, {'k': (2, 3)}]) %}"
+          "{{ a | default('x') ~ b[0:1] }}{% endmacro %}"
+          '{% for x in xs if x is not none %}'
+          "{{ m(x, b=x.y) if x is eq 1 else x['z'] }}{% endfor %}"
+          '{% set t %}{{ -1 ** 2 }}{% endset %}';
+      parseTemplate(source);
+      for (var end = 0; end < source.length; end++) {
+        try {
+          parseTemplate(source.substring(0, end));
+        } on ParserException catch (e) {
+          expect(e.pos, inInclusiveRange(0, end));
+        } on LexerException catch (e) {
+          expect(e.pos, inInclusiveRange(0, end));
+        }
+      }
+    });
+
+    test('Template locates errors in a CRLF template', () {
+      final e = _templateError('{{ a }}\r\n\r\n  {{ 1 + }}\r\n');
+      expect(e.line, 3);
+      expect(e.col, 10);
+      expect(e.source, '{{ a }}\n\n  {{ 1 + }}');
+      expect(e.source.substring(e.pos), '}}');
+    });
+
+    test('Template locates end of input after a trailing newline', () {
+      final e = _templateError('{% if x %}no endif\n');
+      expect(e.source, '{% if x %}no endif');
+      expect(e.pos, e.source.length);
+      expect(e.line, 1);
+      expect(e.col, 19);
+    });
 
     test('end of input after a stripped trailing newline', () {
       final e = _parserError('{% if x %}no endif\n');
@@ -199,6 +238,15 @@ const _testContext = <String, dynamic>{
 Statement _parse(String source) {
   final program = Parser(Lexer(source).tokenize().tokens, source).parse();
   return program.body.single;
+}
+
+ParserException _templateError(String source) {
+  try {
+    Template(source);
+  } on ParserException catch (e) {
+    return e;
+  }
+  fail('Template accepted an invalid template');
 }
 
 ParserException _parserError(String source) {

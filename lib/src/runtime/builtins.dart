@@ -629,14 +629,28 @@ JinjaValue _sort(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _unique(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaList([]);
   final collection = args[0];
-  if (collection is! JinjaList && collection is! JinjaTuple) return collection;
+  final List<JinjaValue> items;
+  if (collection is JinjaList || collection is JinjaTuple) {
+    items = collection.asList;
+  } else if (collection is JinjaStringValue) {
+    items = [
+      for (final part in collection.value.parts)
+        for (final char in part.val.split(''))
+          JinjaStringValue(JinjaString([JinjaStringPart(char, part.isInput)])),
+    ];
+  } else if (collection is JinjaMap) {
+    items = collection.items.keys.toList();
+  } else {
+    return collection;
+  }
 
+  final caseSensitive =
+      kwargs['case_sensitive']?.asBool ?? (args.length > 1 && args[1].asBool);
   final attribute =
       kwargs['attribute']?.toString() ??
-      (args.length > 1 ? args[1].toString() : null);
-  final caseSensitive = kwargs['case_sensitive']?.asBool ?? false;
+      (args.length > 2 ? args[2].toString() : null);
 
-  return JinjaList(_uniqueItems(collection.asList, caseSensitive, attribute));
+  return JinjaList(_uniqueItems(items, caseSensitive, attribute));
 }
 
 List<JinjaValue> _uniqueItems(
