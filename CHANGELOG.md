@@ -9,6 +9,8 @@
 - Fixed an incomplete expression at the end of the template, such as `{{ 1 +`, throwing `RangeError` instead of `ParserException`.
 - Fixed `ParserException` from `Template` on templates with `\r\n` or a trailing newline: its `source`, `pos`, `line` and `col` now all refer to the normalized text, as with `parseTemplate`.
 - Changed `unique` to follow Jinja2's signature, `unique(case_sensitive=false, attribute=none)`: the first positional argument is now `case_sensitive`, not `attribute`. `unique` now also deduplicates the characters of a string and the keys of a dict.
+- Fixed input marking being dropped by `~`, string repetition (`*`), `replace`, `capitalize`, `title`, `string`, `indent` and the last piece of `split` (first of `rsplit`), matching llama.cpp. Input-marked text from these is now escaped on output like `{{ value }}`. `join` still drops the marking, as in llama.cpp.
+- Fixed double escaping when an escaped block, such as a `{% set %}` block or macro output, is joined with `+` to plain text.
 
 ## 1.0.0
 

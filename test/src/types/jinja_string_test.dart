@@ -264,4 +264,85 @@ void main() {
       },
     );
   });
+
+  group('Input marking matches llama.cpp', () {
+    // Parts as llama.cpp e85e15cf6 marks them, adjacent parts merged:
+    // [I:...] is input, [T:...] is template text.
+    for (final (source, expected) in [
+      ('{{ s ~ t }}', '[I: Ab,c xy]'),
+      ("{{ s ~ 'lit' }}", '[I: Ab,c ][T:lit]'),
+      ('{{ s ~ n }}', '[I: Ab,c ][T:5]'),
+      ('{{ l[0] ~ l[1] }}', '[I:pq]'),
+      ('{{ (s ~ t) | upper }}', '[I: AB,C XY]'),
+      ('{{ s * 2 }}', '[I: Ab,c  Ab,c ]'),
+      ("{{ ('lit' ~ s) * 2 }}", '[T:lit][I: Ab,c ][T:lit][I: Ab,c ]'),
+      ("{{ s | replace('A', 'Z') }}", '[I: Zb,c ]'),
+      ("{{ s | replace('A', t) }}", '[I: xyb,c ]'),
+      ("{{ s.replace('A', 'Z') }}", '[I: Zb,c ]'),
+      ('{{ s | capitalize }}', '[I: ab,c ]'),
+      ('{{ s.capitalize() }}', '[I: ab,c ]'),
+      ("{{ ('lit' ~ s) | capitalize }}", '[T:Lit][I: ab,c ]'),
+      ('{% filter capitalize %}{{ s }}{% endfilter %}', '[I: ab,c ]'),
+      ('{{ s | title }}', '[I: Ab,c ]'),
+      ('{{ s.title() }}', '[I: Ab,c ]'),
+      ('{{ s | string }}', '[I: Ab,c ]'),
+      ('{{ s | indent(2, true) }}', '[I:   Ab,c ]'),
+      ("{{ s.split(',') | last }}", '[I:c ]'),
+      ("{{ s.split(',', 1) | last }}", '[I:c ]'),
+      ("{{ t.split(',') | first }}", '[I:xy]'),
+      ("{{ s.rsplit(',') | first }}", '[I: Ab]'),
+      // llama.cpp drops the marking in these.
+      ('{{ l | join }}', '[T:pq]'),
+      ("{{ s.split(',') | first }}", '[T: Ab]'),
+      ("{{ s.rsplit(',') | last }}", '[T:c ]'),
+      ("{{ ('lit' ~ s) | replace('A', 'Z') }}", '[T:lit Zb,c ]'),
+      ("{{ ('lit' ~ s) | indent(2) }}", '[T:lit Ab,c ]'),
+      ('{{ s[1] }}', '[T:A]'),
+      ('{{ s + t }}', '[I: Ab,c xy]'),
+    ]) {
+      test(source, () {
+        expect(_marks(source), expected);
+      });
+    }
+  });
+
+  group('Input escaping', () {
+    for (final (source, expected) in [
+      ("{{ s ~ '' }}", 'a&lt;b'),
+      ('{{ s * 2 }}', 'a&lt;ba&lt;b'),
+      ("{{ s | replace('a', 'z') }}", 'z&lt;b'),
+      ('{{ s | capitalize }}', 'A&lt;b'),
+      ("{% set x %}{{ s }}{% endset %}{{ x + '' }}", 'a&lt;b'),
+      ("{% macro m() %}{{ s }}{% endmacro %}{{ m() + '' }}", 'a&lt;b'),
+      ("{% set x %}{{ s }}{% endset %}{{ x ~ '' }}", 'a&lt;b'),
+      ('{% set x %}{{ s }}{% endset %}{{ x * 2 }}', 'a&lt;ba&lt;b'),
+      ('{% set x %}{{ s }}{% endset %}{{ x | capitalize }}', 'A&lt;b'),
+      ("{% set x %}{{ s }}{% endset %}{{ x | replace('a', 'z') }}", 'z&lt;b'),
+    ]) {
+      test(source, () {
+        expect(
+          Template(source).render({'s': JinjaString.user('a<b')}),
+          expected,
+        );
+      });
+    }
+  });
+}
+
+String _marks(String source) {
+  final result = Template(source).renderJinjaResult({
+    's': JinjaString.user(' Ab,c '),
+    't': JinjaString.user('xy'),
+    'l': [JinjaString.user('p'), JinjaString.user('q')],
+    'n': 5,
+  });
+  final merged = <JinjaStringPart>[];
+  for (final part in result.parts.where((p) => p.val.isNotEmpty)) {
+    if (merged.isNotEmpty && merged.last.isInput == part.isInput) {
+      merged.last = JinjaStringPart(merged.last.val + part.val, part.isInput);
+    } else {
+      merged.add(part);
+    }
+  }
+  return merged.map((p) => '[${p.isInput ? 'I' : 'T'}:${p.val}]').join();
 }

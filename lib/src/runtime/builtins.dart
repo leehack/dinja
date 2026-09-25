@@ -222,12 +222,29 @@ JinjaValue _replaceFilter(
   if (args.length < 3) return obj;
   final oldVal = args[1].toString();
   final newVal = args[2].toString();
+  return _derived(obj, obj.toString().replaceAll(oldVal, newVal));
+}
+
+JinjaStringValue _derived(JinjaValue source, String text) {
+  if (source is! JinjaStringValue) return JinjaStringValue.fromString(text);
   return JinjaStringValue(
     JinjaString.from(
-      obj.toString().replaceAll(oldVal, newVal),
-      isSafe: obj.isSafe,
-    ),
+      text,
+      isSafe: source.isSafe,
+    ).markInputBasedOn(source.value),
   );
+}
+
+JinjaStringValue _retext(JinjaStringValue source, String text) {
+  if (text.length != source.value.length) return _derived(source, text);
+  final parts = <JinjaStringPart>[];
+  var start = 0;
+  for (final part in source.value.parts) {
+    final end = start + part.val.length;
+    parts.add(JinjaStringPart(text.substring(start, end), part.isInput));
+    start = end;
+  }
+  return JinjaStringValue(JinjaString(parts, isSafe: source.isSafe));
 }
 
 JinjaValue _range(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -1369,9 +1386,12 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
           }
         }
 
-        return JinjaList(
-          parts.map((s) => JinjaStringValue.fromString(s)).toList(),
-        );
+        return JinjaList([
+          for (var i = 0; i < parts.length; i++)
+            i == parts.length - 1
+                ? _derived(obj, parts[i])
+                : JinjaStringValue.fromString(parts[i]),
+        ]);
       });
     case 'rsplit':
       return JinjaFunction('rsplit', (args, kwargs) {
@@ -1403,22 +1423,24 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
             parts = s.split(delimiter);
           }
         }
-        return JinjaList(
-          parts.map((ps) => JinjaStringValue.fromString(ps)).toList(),
-        );
+        return JinjaList([
+          for (var i = 0; i < parts.length; i++)
+            i == 0
+                ? _derived(obj, parts[i])
+                : JinjaStringValue.fromString(parts[i]),
+        ]);
       });
     case 'capitalize':
       return JinjaFunction('capitalize', (args, kwargs) {
         final s = obj.value.toString();
         if (s.isEmpty) return obj;
-        return JinjaStringValue.fromString(
-          s[0].toUpperCase() + s.substring(1).toLowerCase(),
-        );
+        return _retext(obj, s[0].toUpperCase() + s.substring(1).toLowerCase());
       });
     case 'title':
       return JinjaFunction('title', (args, kwargs) {
         final s = obj.value.toString();
-        return JinjaStringValue.fromString(
+        return _retext(
+          obj,
           s
               .split(' ')
               .map((w) {
@@ -1448,17 +1470,10 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
             start = idx + newVal.length;
             total++;
           }
-          return JinjaStringValue(
-            JinjaString.from(res, isSafe: obj.value.isSafe),
-          );
+          return _derived(obj, res);
         }
 
-        return JinjaStringValue(
-          JinjaString.from(
-            s.replaceAll(oldVal, newVal),
-            isSafe: obj.value.isSafe,
-          ),
-        );
+        return _derived(obj, s.replaceAll(oldVal, newVal));
       });
   }
   return null;
@@ -1680,11 +1695,12 @@ JinjaValue _indent(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
     }
   }
 
-  return JinjaStringValue.fromString(buffer.toString());
+  return _derived(args[0], buffer.toString());
 }
 
 JinjaValue _string(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
+  if (args[0] is JinjaStringValue) return args[0];
   return JinjaStringValue.fromString(args[0].toString());
 }
 
