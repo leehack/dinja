@@ -32,6 +32,9 @@ jobs:
           dart test --coverage=coverage
           dart pub global run coverage:format_coverage --lcov --in=coverage --out=coverage/lcov.info --report-on=lib
 
+      - name: Run tests on Chrome
+        run: dart test -p chrome test/src test/llama_cross_test.dart
+
       - name: Verify Coverage (>= 80%)
         run: dart script/verify_coverage.dart coverage/lcov.info 80
 

@@ -100,6 +100,15 @@ void main() {
       );
     });
 
+    test('-0.0 and 1e20 from Dart are floats on every platform', () {
+      expect(
+        Template("{{ '' ~ x }}").render({
+          'x': [1e20, -0.0],
+        }),
+        '[100000000000000000000.0, -0.0]',
+      );
+    });
+
     test('does not escape an already escaped item again', () {
       final source = '{% set s %}{{ x }}{% endset %}{{ [s] }}';
       expect(Template(source).render({'x': JinjaString.user('<')}), "['&lt;']");
