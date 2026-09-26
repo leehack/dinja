@@ -1,5 +1,6 @@
 import '../types/value.dart';
 import '../types/jinja_string.dart';
+import '../types/marking.dart';
 import '../types/repr.dart';
 import 'dart:math' as math;
 import '../runtime/context.dart';
@@ -9,7 +10,7 @@ import '../lexer.dart'; // for Token
 /// Thrown by `break` and `continue`. Carries the output that the loop pass
 /// rendered before the statement, which the loop keeps.
 abstract class LoopSignal {
-  final List<JinjaStringPart> parts = [];
+  final List<JinjaString> output = [];
 }
 
 class BreakSignal extends LoopSignal {}
@@ -48,53 +49,53 @@ class Program extends Statement {
   @override
   String get type => 'Program';
 
+  /// Renders the template. Input-marked text is escaped here, once.
   @override
   JinjaValue execute(Context ctx) {
-    return execStatements(body, ctx);
+    final result = execStatements(body, ctx) as JinjaStringValue;
+    return JinjaStringValue(result.value.escape());
   }
 }
 
-// ... helper to execute list of statements and gather output ...
-/// Executes a list of [stmts] within the given [ctx] and aggregates their results.
+/// Executes a list of [stmts] within the given [ctx] and joins their output.
 ///
 /// If a statement returns a string value, it is added to the output.
 /// Non-string values (except None and Undefined) are converted to strings.
+/// Input-marked text stays unescaped, so a filter applied to the output sees
+/// it as it was passed in; see [_joinOutput].
 JinjaValue execStatements(List<Statement> stmts, Context ctx) {
-  List<JinjaStringPart> parts = [];
+  final output = <JinjaString>[];
   try {
     for (final stmt in stmts) {
       final val = stmt.execute(ctx);
       if (val is JinjaStringValue) {
-        if (val.isSafe) {
-          parts.addAll(val.value.parts);
-        } else {
-          // Check parts for input/unsafe content
-          for (final part in val.value.parts) {
-            if (part.isInput) {
-              final escaped = part.val
-                  .replaceAll('&', '&amp;')
-                  .replaceAll('<', '&lt;')
-                  .replaceAll('>', '&gt;')
-                  .replaceAll('"', '&quot;')
-                  .replaceAll("'", '&#39;');
-              // print('DEBUG escaping: ${part.val} -> $escaped');
-              parts.add(
-                JinjaStringPart(escaped, part.isInput),
-              ); // Escaped -> safe/template
-            } else {
-              parts.add(part);
-            }
-          }
-        }
+        output.add(val.value);
       } else if (!val.isNone && !val.isUndefined) {
-        parts.addAll(reprOf(val).escape().parts);
+        output.add(reprOf(val));
       }
     }
   } on LoopSignal catch (signal) {
-    signal.parts.insertAll(0, parts);
+    signal.output.insertAll(0, output);
     rethrow;
   }
-  return JinjaStringValue(JinjaString(parts, isSafe: true));
+  return JinjaStringValue(_joinOutput(output));
+}
+
+/// Joins rendered [pieces].
+///
+/// Input-marked text stays unescaped unless a piece is a safe string with
+/// input-marked text, whose text is final: then every piece is escaped and
+/// the result is safe.
+JinjaString _joinOutput(List<JinjaString> pieces) {
+  final safeInput = pieces.any(
+    (p) => p.isSafe && p.parts.any((part) => part.isInput),
+  );
+  if (pieces.any(hasRawInput) && !safeInput) {
+    return JinjaString([for (final p in pieces) ...p.parts]);
+  }
+  return JinjaString([
+    for (final p in pieces) ...p.escape().parts,
+  ], isSafe: true);
 }
 
 /// Executes [stmts] whose output is captured rather than printed, as in a
@@ -104,7 +105,7 @@ JinjaValue _execCaptured(List<Statement> stmts, Context ctx) {
   try {
     return execStatements(stmts, ctx);
   } on LoopSignal catch (signal) {
-    signal.parts.clear();
+    signal.output.clear();
     rethrow;
   }
 }
@@ -194,22 +195,22 @@ class ForStatement extends Statement {
       // Sort keys for deterministic output if needed, though Jinja2 doesn't strictly guarantee order, usually tests expect sorted keys or we should sort.
       // Standard Jinja2 iterates keys.
       // llama.cpp tests seem to expect keys.
-      final keys = iterableVal.asMap.keys.toList();
-      // keys.sort(); // Optional: sort keys? Dinja existing tests expect 'a,b'. Maps in Dart preserve insertion order? LinkedHashMap does.
-      // If the map came from JSON/Literal, it's LinkedHashMap.
-
-      items = keys.map((k) => JinjaStringValue.fromString(k)).toList();
+      // Keys with the same string form are iterated once, as in asMap.
+      final keys = <String, JinjaValue>{
+        for (final k in iterableVal.items.keys) k.toString(): k,
+      };
+      items = [
+        for (final MapEntry(:key, :value) in keys.entries)
+          value is JinjaStringValue && hasRawInput(value.value)
+              ? value
+              : JinjaStringValue.fromString(key),
+      ];
     } else if (iterableVal is JinjaList) {
       items = iterableVal.items;
     } else if (iterableVal is JinjaTuple) {
       items = iterableVal.items;
     } else if (iterableVal is JinjaStringValue) {
-      // Iterate chars
-      items = iterableVal.value.parts
-          .map((p) => p.val)
-          .expand((s) => s.split(''))
-          .map((c) => JinjaStringValue.fromString(c))
-          .toList();
+      items = charsOf(iterableVal.value);
     }
 
     // Filter items first if testExpr
@@ -228,7 +229,7 @@ class ForStatement extends Statement {
     }
 
     // Loop
-    List<JinjaStringPart> parts = [];
+    final output = <JinjaString>[];
     // As in Jinja2 and llama.cpp, the else block runs unless a pass finishes
     // without `break` or `continue`.
     var iterated = false;
@@ -257,12 +258,12 @@ class ForStatement extends Statement {
 
       try {
         final result = execStatements(body, loopCtx);
-        if (result is JinjaStringValue) parts.addAll(result.value.parts);
+        if (result is JinjaStringValue) output.add(result.value);
         iterated = true;
       } on ContinueSignal catch (signal) {
-        parts.addAll(signal.parts);
+        output.addAll(signal.output);
       } on BreakSignal catch (signal) {
-        parts.addAll(signal.parts);
+        output.addAll(signal.output);
         break;
       }
     }
@@ -270,15 +271,15 @@ class ForStatement extends Statement {
     if (!iterated) {
       try {
         final result = execStatements(defaultBlock, ctx);
-        if (result is JinjaStringValue) parts.addAll(result.value.parts);
+        if (result is JinjaStringValue) output.add(result.value);
       } on LoopSignal catch (signal) {
         // A `break` or `continue` in the else block belongs to an enclosing
         // loop and keeps the output of this one, as in Jinja2.
-        signal.parts.insertAll(0, parts);
+        signal.output.insertAll(0, output);
         rethrow;
       }
     }
-    return JinjaStringValue(JinjaString(parts, isSafe: true));
+    return JinjaStringValue(_joinOutput(output));
   }
 
   void _bindLoopVar(Context ctx, Expression loopVar, JinjaValue item) {
@@ -789,14 +790,15 @@ class MemberExpression extends Expression {
           return JinjaStringValue(s.substring(start, stop));
         }
 
+        final raw = rawOf(s);
         final parts = <JinjaStringPart>[];
         if (step > 0) {
           for (int i = start; i < stop; i += step) {
-            if (i >= 0 && i < len) parts.addAll(s[i].parts);
+            if (i >= 0 && i < len) parts.addAll(raw[i].parts);
           }
         } else if (step < 0) {
           for (int i = start; i > stop; i += step) {
-            if (i >= 0 && i < len) parts.addAll(s[i].parts);
+            if (i >= 0 && i < len) parts.addAll(raw[i].parts);
           }
         }
         return JinjaStringValue(JinjaString(parts));
@@ -811,6 +813,14 @@ class MemberExpression extends Expression {
       final prop = property.execute(ctx);
       if (!computed && prop.asInt < 0) {
         throw Exception('Static member property cannot be negative');
+      }
+      // As in llama.cpp, a subscript of undefined is undefined, and none
+      // takes only a string subscript.
+      if (obj.isUndefined || prop.isUndefined) return const JinjaUndefined();
+      if (obj.isNone && prop is! JinjaStringValue) {
+        throw Exception(
+          'Cannot access property with non-string: got ${prop.typeName}',
+        );
       }
 
       if (obj is JinjaMap) {
@@ -851,7 +861,7 @@ class MemberExpression extends Expression {
           String s = obj.value.toString();
           if (idx < 0) idx += s.length;
           if (idx >= 0 && idx < s.length) {
-            return JinjaStringValue.fromString(s[idx]);
+            return JinjaStringValue(rawOf(obj.value)[idx]);
           }
         }
       }
@@ -1241,13 +1251,18 @@ class TestExpression extends Expression {
 }
 
 JinjaStringValue _concat(JinjaValue l, JinjaValue r) {
-  var left = l is JinjaStringValue ? l.value : JinjaString.template('$l');
-  var right = r is JinjaStringValue ? r.value : JinjaString.template('$r');
-  if (left.isSafe != right.isSafe) {
-    left = left.escape();
-    right = right.escape();
-  }
-  return JinjaStringValue(left + right);
+  final left = _operand(l);
+  final right = _operand(r);
+  if (left.isSafe == right.isSafe) return JinjaStringValue(left + right);
+  final joined = _joinOutput([left, right]);
+  if (!joined.isSafe) return JinjaStringValue(joined);
+  return JinjaStringValue(left.escape() + right.escape());
+}
+
+JinjaString _operand(JinjaValue v) {
+  if (v is JinjaStringValue) return v.value;
+  final s = stringOf(v);
+  return hasRawInput(s) ? s : JinjaString.template('$v');
 }
 
 /// Represents a selection expression used in filtering iterations.

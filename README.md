@@ -93,6 +93,8 @@ Real templates come from the `chat_template` field of a model's `tokenizer_confi
 
 Wrap untrusted values in `JinjaString.user`. They are escaped when rendered; a plain `String` is treated as template text and is not.
 
+Input text keeps its marking through filters, `~`, loops, macros and `{% set %}` and `{% filter %}` blocks, and is escaped once, when the template outputs it. So a filter sees it as it was passed in: `{% filter length %}{{ name }}{% endfilter %}` counts the characters of `name`, not of its escaped form. `tojson` and `join` escape only the input text in their output, not the JSON's quotes or the template's separator. `| safe` and `markSafe()` turn escaping off.
+
 ```dart
 import 'package:dinja/dinja.dart';
 

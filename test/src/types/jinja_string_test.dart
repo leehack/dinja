@@ -266,7 +266,7 @@ void main() {
   });
 
   group('Input marking matches llama.cpp', () {
-    // Parts as llama.cpp e85e15cf6 marks them, adjacent parts merged:
+    // Parts as llama.cpp 7fe450e19 marks them, adjacent parts merged:
     // [I:...] is input, [T:...] is template text.
     for (final (source, expected) in [
       ('{{ s ~ t }}', '[I: Ab,c xy]'),
@@ -276,9 +276,7 @@ void main() {
       ('{{ (s ~ t) | upper }}', '[I: AB,C XY]'),
       ('{{ s * 2 }}', '[I: Ab,c  Ab,c ]'),
       ("{{ ('lit' ~ s) * 2 }}", '[T:lit][I: Ab,c ][T:lit][I: Ab,c ]'),
-      ("{{ s | replace('A', 'Z') }}", '[I: Zb,c ]'),
       ("{{ s | replace('A', t) }}", '[I: xyb,c ]'),
-      ("{{ s.replace('A', 'Z') }}", '[I: Zb,c ]'),
       ('{{ s | capitalize }}', '[I: ab,c ]'),
       ('{{ s.capitalize() }}', '[I: ab,c ]'),
       ("{{ ('lit' ~ s) | capitalize }}", '[T:Lit][I: ab,c ]'),
@@ -286,19 +284,47 @@ void main() {
       ('{{ s | title }}', '[I: Ab,c ]'),
       ('{{ s.title() }}', '[I: Ab,c ]'),
       ('{{ s | string }}', '[I: Ab,c ]'),
-      ('{{ s | indent(2, true) }}', '[I:   Ab,c ]'),
       ("{{ s.split(',') | last }}", '[I:c ]'),
       ("{{ s.split(',', 1) | last }}", '[I:c ]'),
       ("{{ t.split(',') | first }}", '[I:xy]'),
       ("{{ s.rsplit(',') | first }}", '[I: Ab]'),
-      // llama.cpp drops the marking in these.
-      ('{{ l | join }}', '[T:pq]'),
-      ("{{ s.split(',') | first }}", '[T: Ab]'),
-      ("{{ s.rsplit(',') | last }}", '[T:c ]'),
-      ("{{ ('lit' ~ s) | replace('A', 'Z') }}", '[T:lit Zb,c ]'),
-      ("{{ ('lit' ~ s) | indent(2) }}", '[T:lit Ab,c ]'),
-      ('{{ s[1] }}', '[T:A]'),
       ('{{ s + t }}', '[I: Ab,c xy]'),
+    ]) {
+      test(source, () {
+        expect(_marks(source), expected);
+      });
+    }
+  });
+
+  group('Input marking kept where llama.cpp drops or widens it', () {
+    // Each character keeps the marking of where it came from, so input text
+    // is escaped and template text is not. llama.cpp 7fe450e19 marks each as
+    // noted; its marking only controls special-token parsing.
+    for (final (source, expected) in [
+      // llama.cpp: [T:pq]
+      ('{{ l | join }}', '[I:pq]'),
+      // llama.cpp: [T:p, q]
+      ("{{ l | join(', ') }}", '[I:p][T:, ][I:q]'),
+      // llama.cpp: [T:" Ab,c "]
+      ('{{ s | tojson }}', '[T:"][I: Ab,c ][T:"]'),
+      // llama.cpp: [T:{" Ab,c ": "xy"}]
+      ('{{ {s: t} | tojson }}', '[T:{"][I: Ab,c ][T:": "][I:xy][T:"}]'),
+      // llama.cpp: [T: Ab]
+      ("{{ s.split(',') | first }}", '[I: Ab]'),
+      // llama.cpp: [T:c ]
+      ("{{ s.rsplit(',') | last }}", '[I:c ]'),
+      // llama.cpp: [T:A]
+      ('{{ s[1] }}', '[I:A]'),
+      // llama.cpp: [T:lit Zb,c ]
+      ("{{ ('lit' ~ s) | replace('A', 'Z') }}", '[T:lit][I: ][T:Z][I:b,c ]'),
+      // llama.cpp: [T:lit Ab,c ]
+      ("{{ ('lit' ~ s) | indent(2) }}", '[T:lit][I: Ab,c ]'),
+      // llama.cpp: [I: Zb,c ]
+      ("{{ s | replace('A', 'Z') }}", '[I: ][T:Z][I:b,c ]'),
+      // llama.cpp: [I: Zb,c ]
+      ("{{ s.replace('A', 'Z') }}", '[I: ][T:Z][I:b,c ]'),
+      // llama.cpp: [I:   Ab,c ]
+      ('{{ s | indent(2, true) }}', '[T:  ][I: Ab,c ]'),
     ]) {
       test(source, () {
         expect(_marks(source), expected);

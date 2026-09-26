@@ -833,4 +833,155 @@ void main() {
       });
     }
   });
+  group('Filters on captured output see the input', () {
+    // A filter block, or a filter on the output of a block set, macro or
+    // caller(), sees input-marked text as it was passed in, as `x | upper`
+    // does. Escaping happens once, at output. llama.cpp 7fe450e19 and
+    // Jinja2 3.1.6 without autoescape give each output with the input
+    // unescaped; Jinja2 with autoescape filters the escaped text instead.
+    final values = {'x': JinjaString.user('<b>')};
+    const cases = {
+      '{% filter upper %}{{ x }}{% endfilter %}': '&lt;B&gt;',
+      '{% set s %}{{ x }}{% endset %}{{ s | upper }}': '&lt;B&gt;',
+      '{% filter replace("b", "i") %}{{ x }}{% endfilter %}': '&lt;i&gt;',
+      '{% filter upper %}{% if true %}{{ x }}{% endif %}{% endfilter %}':
+          '&lt;B&gt;',
+      '{% macro m() %}{{ x }}{% endmacro %}{{ m() | upper }}': '&lt;B&gt;',
+      '{% set s %}{% for i in [1] %}{{ x }}{% endfor %}{% endset %}'
+              '{{ s | replace("<", "[") }}':
+          '[b&gt;',
+      '{% filter trim %} {{ x }} {% endfilter %}': '&lt;b&gt;',
+      '{% filter upper %}<i>{{ x }}{% endfilter %}': '<I>&lt;B&gt;',
+      '{% set s %}{{ x }}{% endset %}{{ s }}|{{ s ~ x }}':
+          '&lt;b&gt;|&lt;b&gt;&lt;b&gt;',
+      '{% set s %}a{% endset %}{% filter upper %}{{ s ~ x }}{% endfilter %}':
+          'A&lt;B&gt;',
+    };
+    cases.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render(values), expected);
+      });
+    });
+
+    // llama.cpp 7fe450e19 output; Jinja2 raises for the filter block and
+    // counts the escaped text with autoescape.
+    const lengths = {
+      '{% filter length %}{{ x }}{% endfilter %}': '3',
+      '{% set s %}{{ x }}{% endset %}{{ s | length }}': '3',
+      '{% macro m() %}{{ caller() | length }}{% endmacro %}'
+              '{% call m() %}{{ x }}{% endcall %}':
+          '3',
+    };
+    lengths.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render(values), expected);
+      });
+    });
+
+    test('safe turns escaping off, as for {{ x | safe }}', () {
+      expect(
+        Template(
+          '{% filter safe %}{{ x }}{% endfilter %}|'
+          '{% set s %}{{ x }}{% endset %}{{ s | safe }}',
+        ).render(values),
+        '<b>|<b>',
+      );
+    });
+
+    test('escapes input next to safe input before filtering', () {
+      // The safe text is final, so the rest is escaped first, as with `~`.
+      expect(
+        Template(
+          '{% filter upper %}{{ x }}{{ x | safe }}{% endfilter %}',
+        ).render(values),
+        '&LT;B&GT;<B>',
+      );
+    });
+
+    test('keeps joining safe and unsafe template text into one part', () {
+      final result = Template(
+        '{{ "a" ~ ([1] | tojson) }}',
+      ).renderJinjaResult({});
+      expect(result.parts.map((p) => (p.val, p.isInput)), [('a[1]', false)]);
+    });
+  });
+
+  group('Member access on undefined', () {
+    // llama.cpp 7fe450e19 output. Jinja2 3.1.6 raises UndefinedError.
+    const cases = {
+      '[{{ y.text }}]': '[]',
+      "[{{ y[0]['text'] }}]": '[]',
+      '[{{ y[0].text }}]': '[]',
+      '[{{ y.foo }}]|[{{ y[0].foo }}]': '[]|[]',
+      '[{{ y[0].upper }}]|[{{ y[0].items }}]': '[]|[]',
+      "{{ '[' ~ y[0]['text'] ~ ']' }}": '[]',
+      "[{{ (y[0]['text']) is defined }}]|[{{ y[0] is defined }}]":
+          '[False]|[False]',
+      "[{{ y.upper is defined }}]|[{{ y.text is defined }}]|[{{ y['upper'] is defined }}]|[{{ y.get is defined }}]":
+          '[True]|[False]|[False]|[False]',
+      '[{{ y.upper() }}]|[{{ y.length() }}]|[{{ y.items() | length }}]|[{{ y.default(1) }}]|[{{ y.first() is defined }}]|[{{ y.sum() }}]':
+          '[]|[0]|[0]|[1]|[False]|[0]',
+      '[{{ y[none] }}]|[{{ y.text.more }}]|[{{ y[0][1][2] }}]': '[]|[]|[]',
+      "{% for m in y.items() %}x{% endfor %}|{% for c in y[0]['text'] %}x{% endfor %}":
+          '|',
+    };
+    cases.forEach((source, expected) {
+      test('renders $source', () {
+        expect(Template(source).render(), expected);
+      });
+    });
+
+    test('a member function it lacks cannot be called', () {
+      // llama.cpp: "Callee is not a function"; Jinja2 raises UndefinedError.
+      expect(() => Template('{{ y.foo() }}').render(), throwsException);
+    });
+
+    test('a missing message content prints nothing', () {
+      // Devstral Small 2507 prints message['content'][0]['text'] when the
+      // content is not a string. llama.cpp 7fe450e19 output; Jinja2 raises.
+      const source = "[{{ m['content'][0]['text'] }}]";
+      expect(
+        Template(source).render({
+          'm': {'role': 'assistant'},
+        }),
+        '[]',
+      );
+      expect(
+        Template(source).render({
+          'm': {'role': 'assistant', 'content': ''},
+        }),
+        '[]',
+      );
+    });
+  });
+
+  group('Subscript of none', () {
+    test('throws for a number, as in llama.cpp', () {
+      // llama.cpp 7fe450e19 raises this message; Jinja2 3.1.6 raises
+      // "None has no element 0" for x[0]['text'] and prints x[0] as ''.
+      for (final source in ["{{ x[0]['text'] }}", '{{ x[0] }}']) {
+        expect(
+          () => Template(source).render({'x': null}),
+          throwsA(
+            predicate(
+              (e) => e.toString().contains(
+                'Cannot access property with non-string: got Integer',
+              ),
+            ),
+          ),
+          reason: source,
+        );
+      }
+    });
+
+    test('gives undefined for a name', () {
+      // llama.cpp 7fe450e19 and Jinja2 3.1.6 output.
+      expect(
+        Template(
+          "[{{ x['text'] }}]|[{{ x.text }}]|[{{ x.text is defined }}]",
+        ).render({'x': null}),
+        '[]|[]|[False]',
+      );
+    });
+  });
 }
