@@ -113,6 +113,167 @@ void main() {
     });
   });
 
+  group('Rendered output is tracked per render', () {
+    // `safe` on rendered output escapes its input, as Jinja2 with
+    // autoescape does; on a value the caller supplied it does not.
+    final x = JinjaString.user('<b>');
+
+    test('with input from a function the caller supplied', () {
+      final getName = JinjaFunction(
+        'get_name',
+        (args, kwargs) => JinjaStringValue(JinjaString.user('<b>')),
+      );
+      const source =
+          '{% set c %}<i>{{ get_name() }}{% endset %}{{ (c ~ "") | safe }}|'
+          '{{ c | upper | safe }}|{{ [c] | join | safe }}|{{ c[0:] | safe }}|'
+          '{{ c.replace("i", "u") | safe }}|{{ get_name() | safe }}';
+      const expected =
+          '<i>&lt;b&gt;|<I>&lt;B&gt;|<i>&lt;b&gt;|<i>&lt;b&gt;|'
+          '<u>&lt;b&gt;|<b>';
+      expect(Template(source).render({'get_name': getName}), expected);
+      final nested = {
+        'fns': [
+          {'get_name': getName},
+        ],
+      };
+      expect(
+        Template(
+          source.replaceAll('get_name()', 'fns[0].get_name()'),
+        ).render(nested),
+        expected,
+      );
+    });
+
+    test('never marks what a function the caller supplied returns', () {
+      final getName = JinjaFunction(
+        'get_name',
+        (args, kwargs) => JinjaStringValue(JinjaString.user('<b>')),
+      );
+      expect(
+        Template(
+          '{% set c %}<i>{{ x }}{% endset %}{% set d = {"f": get_name, "c": c} %}'
+          '{{ get_name(c) | safe }}|{{ d.f() | safe }}',
+        ).render({'x': x, 'get_name': getName}),
+        '<b>|<b>',
+      );
+    });
+
+    test('with input a function the caller supplied stores', () {
+      final box = JinjaMap({});
+      final stash = JinjaFunction('stash', (args, kwargs) {
+        box.items[JinjaStringValue.fromString('v')] = JinjaStringValue(
+          JinjaString.user('<b>'),
+        );
+        return const JinjaNone();
+      });
+      expect(
+        Template(
+          '{% set _ = stash() %}{% set c %}<i>{{ box.v }}{% endset %}'
+          '{{ c | upper | safe }}',
+        ).render({'box': box, 'stash': stash}),
+        '<I>&lt;B&gt;',
+      );
+    });
+
+    test('with input nested in the values', () {
+      expect(
+        Template(
+          '{% set c %}<i>{{ d.k[0] }}{% endset %}{{ c | upper | safe }}|'
+          '{{ d.k[0] | safe }}',
+        ).render({
+          'd': {
+            'k': [x],
+          },
+        }),
+        '<I>&lt;B&gt;|<b>',
+      );
+    });
+
+    test('in a dict key and a repeat', () {
+      expect(
+        Template(
+          '{% set c %}<i>{{ x }}{% endset %}{{ {c: 1} | tojson | safe }}|'
+          '{{ (2 * c) | safe }}',
+        ).render({'x': x}),
+        '{"<i>&lt;b&gt;": 1}|<i>&lt;b&gt;<i>&lt;b&gt;',
+      );
+    });
+
+    test('never marks a value the caller supplied', () {
+      const k = JinjaString([JinjaStringPart('<b>', true)]);
+      expect(
+        Template(
+          '{% set c %}<i>{{ x }}{% endset %}{% set l = [x, c] %}'
+          '{% set p = l.pop(0) %}{{ x | safe }}|{{ p | safe }}|'
+          '{{ x is escaped }}',
+        ).render({'x': x}),
+        '<b>|<b>|False',
+      );
+      expect(
+        Template(
+          '{% set c %}{{ x }}{% endset %}{% set l = [y, c] %}'
+          '{% set p = l.pop(0) %}{{ p | safe }}|{{ x | safe }}',
+        ).render({'x': k, 'y': k}),
+        '<b>|<b>',
+      );
+    });
+
+    test('never marks a value made before an operation', () {
+      expect(
+        Template(
+          '{% set c %}<i>{{ x }}{% endset %}{% set y = x | upper %}'
+          '{% set l = [y, c] %}{% set p = l.pop(0) %}{{ p | safe }}',
+        ).render({'x': x}),
+        '<B>',
+      );
+    });
+
+    test('is not kept between renders', () {
+      const k = JinjaString([JinjaStringPart('<b>', true)]);
+      final values = {'x': x, 'k': k};
+      Template(
+        '{% set c %}<i>{{ x }}{{ k }}{% endset %}{% set l = [x, k, c] %}'
+        '{% set _ = l.pop(0) %}{% set _ = l.pop(0) %}{{ c | safe }}',
+      ).render(values);
+      expect(
+        Template(
+          '{{ x | safe }}|{{ x is escaped }}|{{ k | safe }}',
+        ).render(values),
+        '<b>|False|<b>',
+      );
+    });
+
+    test('starts afresh in a render inside a function', () {
+      final probe = JinjaFunction(
+        'probe',
+        (args, kwargs) => JinjaStringValue.fromString(
+          Template('{{ v is escaped }}').render({'v': args[0]}),
+        ),
+      );
+      expect(
+        Template(
+          '{% set c %}<i>{{ x }}{% endset %}{{ probe(c) }}|{{ c is escaped }}',
+        ).render({'x': x, 'probe': probe}),
+        'False|True',
+      );
+    });
+
+    test('is restored after a render inside a function', () {
+      final inner = JinjaFunction(
+        'inner',
+        (args, kwargs) => JinjaStringValue(
+          JinjaString.template(Template('{{ 1 }}').render()),
+        ),
+      );
+      expect(
+        Template(
+          '{% set c %}<i>{{ x }}{% endset %}{{ inner() }}{{ c | upper | safe }}',
+        ).render({'x': x, 'inner': inner}),
+        '1<I>&lt;B&gt;',
+      );
+    });
+  });
+
   group('Escaping invariants', () {
     // Every expression in every wrapper: input-marked text is escaped
     // exactly once, and template text is never escaped.

@@ -50,66 +50,109 @@ List<JinjaValue> charsOf(JinjaString s) => [
       JinjaStringValue(JinjaString([JinjaStringPart(c, p.isInput)])),
 ];
 
-final Expando<bool> _rendered = Expando();
-var _inputSeen = false;
+/// The rendered output of one render and the values its caller supplied.
+class _Render {
+  final Set<JinjaString> rendered = Set.identity();
+  final Set<JinjaString> supplied = Set.identity();
+  final Set<JinjaFunction> functions = Set.identity();
 
-/// Runs [render] over the [values] it is given. Rendered output is tracked
-/// only when they hold input-marked text.
+  /// Whether the caller supplied input-marked text or a function, the only
+  /// sources of input-marked text in a render.
+  bool get tracking => supplied.isNotEmpty || functions.isNotEmpty;
+
+  void supply(Iterable<JinjaValue> values) => _walk(values, (s) {
+    if (hasRawInput(s)) supplied.add(s);
+  }, onFunction: functions.add);
+}
+
+_Render? _render;
+
+/// Runs [render] over the caller's [values], with its own record of
+/// rendered output, restored afterwards.
 T renderScope<T>(Iterable<JinjaValue> values, T Function() render) {
-  final saved = _inputSeen;
-  var input = false;
-  _walk(values, (s) => input = input || hasRawInput(s));
-  _inputSeen = input;
+  final saved = _render;
+  _render = _Render()..supply(values);
   try {
     return render();
   } finally {
-    _inputSeen = saved;
+    _render = saved;
   }
 }
 
 /// Records [s] as rendered output: a block `set`, macro, `caller()` or
 /// `filter` block body. Its text is final, as in Jinja2 with autoescape, so
 /// `safe` escapes the input-marked text in it.
-void markRendered(JinjaString s) {
-  if (hasRawInput(s)) _rendered[s] = true;
-}
+void markRendered(JinjaString s) => _render?.rendered.add(s);
 
-/// Whether [s] is rendered output, or derived from it or from safe text.
-bool isRendered(JinjaString s) => _rendered[s] ?? false;
+/// Whether [s] is rendered output, or derived from it or from safe text, in
+/// the current render.
+bool isRendered(JinjaString s) => _render?.rendered.contains(s) ?? false;
 
-bool _isFinal(JinjaString s) => s.isSafe || isRendered(s);
+/// Whether [f] was supplied by the caller of the current render.
+bool isSupplied(JinjaFunction f) => _render?.functions.contains(f) ?? false;
 
-/// Whether [v] is or holds safe text or rendered output.
-bool holdsFinal(JinjaValue v) {
-  if (!_inputSeen) return false;
-  var found = false;
-  _walk([v], (s) => found = found || _isFinal(s));
-  return found;
-}
-
-/// Marks the new strings with input-marked text in [result] as rendered
-/// when any of [inputs] holds safe text or rendered output, as Jinja2 with
-/// autoescape keeps such a result markup.
-JinjaValue deriveRendered(JinjaValue result, Iterable<JinjaValue> inputs) {
-  if (!_inputSeen) return result;
-  final known = Set<JinjaString>.identity();
-  var fromFinal = false;
-  _walk(inputs, (s) {
-    known.add(s);
-    if (_isFinal(s)) fromFinal = true;
-  });
-  if (!fromFinal) return result;
-  _walk([result], (s) {
-    if (!known.contains(s) && hasRawInput(s)) _rendered[s] = true;
-  });
+/// Records the [result] of a call to [f]: a value from a function the caller
+/// supplied is the caller's, and is never marked rendered.
+JinjaValue called(JinjaFunction f, JinjaValue result) {
+  if (isSupplied(f)) _render!.supply([result]);
   return result;
 }
 
-void _walk(Iterable<JinjaValue> values, void Function(JinjaString) visit) {
+/// The strings in some values, and whether any is safe text or rendered
+/// output, taken before an operation on them.
+class RenderInputs {
+  final Set<JinjaString> _known = Set.identity();
+  var _final = false;
+
+  RenderInputs(Iterable<JinjaValue> values) {
+    final render = _render;
+    if (render == null || !render.tracking) return;
+    _walk(values, (s) {
+      _known.add(s);
+      if (s.isSafe || render.rendered.contains(s)) _final = true;
+    });
+  }
+
+  /// Whether the values hold safe text or rendered output.
+  bool get holdsFinal => _final;
+
+  /// Marks the new strings with input-marked text in [result] as rendered
+  /// when these values hold safe text or rendered output, as Jinja2 with
+  /// autoescape keeps such a result markup.
+  JinjaValue derive(JinjaValue result) {
+    final render = _render;
+    if (render == null || !_final) return result;
+    _walk([result], (s) {
+      if (hasRawInput(s) && !_known.contains(s)) render.rendered.add(s);
+    });
+    return result;
+  }
+}
+
+/// [RenderInputs.derive] for an operation that does not change [inputs],
+/// leaving the values the caller supplied unmarked.
+JinjaValue deriveRendered(JinjaValue result, Iterable<JinjaValue> inputs) {
+  final render = _render;
+  if (render == null || !render.tracking) return result;
+  var fresh = false;
+  _walk([result], (s) {
+    if (hasRawInput(s) && !render.supplied.contains(s)) fresh = true;
+  });
+  if (!fresh) return result;
+  return RenderInputs(inputs).derive(result);
+}
+
+void _walk(
+  Iterable<JinjaValue> values,
+  void Function(JinjaString) visit, {
+  void Function(JinjaFunction)? onFunction,
+}) {
   final seen = Set<Object>.identity();
   void walk(JinjaValue v) {
     if (v is JinjaStringValue) {
       visit(v.value);
+    } else if (v is JinjaFunction) {
+      onFunction?.call(v);
     } else if (v is JinjaList || v is JinjaTuple || v is JinjaMap) {
       if (!seen.add(v)) return;
       if (v is JinjaList) v.items.forEach(walk);

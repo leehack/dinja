@@ -728,15 +728,13 @@ class MemberExpression extends Expression {
     final source = obj;
     if (source == null) return result;
     if (result is JinjaFunction) {
-      if (!holdsFinal(source)) return result;
-      return JinjaFunction(
-        result.name,
-        (args, kwargs) => deriveRendered(result.handler(args, kwargs), [
-          source,
-          ...args,
-          ...kwargs.values,
-        ]),
-      );
+      if (isSupplied(result) || !RenderInputs([source]).holdsFinal) {
+        return result;
+      }
+      return JinjaFunction(result.name, (args, kwargs) {
+        final inputs = RenderInputs([source, ...args, ...kwargs.values]);
+        return inputs.derive(result.handler(args, kwargs));
+      });
     }
     return deriveRendered(result, [source]);
   }
@@ -979,7 +977,7 @@ class CallExpression extends Expression {
       }
     }
 
-    return deriveRendered(func.handler(positionals, kwargs), [
+    return deriveRendered(called(func, func.handler(positionals, kwargs)), [
       ...positionals,
       ...kwargs.values,
     ]);
