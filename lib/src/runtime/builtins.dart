@@ -1,6 +1,7 @@
 // ignore_for_file: non_constant_identifier_names
 import '../types/value.dart';
 import '../types/jinja_string.dart';
+import '../types/marking.dart';
 import '../types/repr.dart';
 import 'strftime.dart';
 import 'dart:convert';
@@ -64,26 +65,12 @@ final Map<String, JinjaFunctionHandler> globalFilters = {
   'format': _formatFilter,
   'string': _string,
   'title': (args, kwargs) =>
-      (_resolveStringMember(
-                args.isNotEmpty && args[0] is JinjaStringValue
-                    ? args[0] as JinjaStringValue
-                    : JinjaStringValue.fromString(
-                        args.isNotEmpty ? args[0].toString() : '',
-                      ),
-                'title',
-              )
-              as JinjaFunction)
-          .handler(args, kwargs),
+      (_resolveStringMember(_asString(args), 'title') as JinjaFunction).handler(
+        args,
+        kwargs,
+      ),
   'capitalize': (args, kwargs) =>
-      (_resolveStringMember(
-                args.isNotEmpty && args[0] is JinjaStringValue
-                    ? args[0] as JinjaStringValue
-                    : JinjaStringValue.fromString(
-                        args.isNotEmpty ? args[0].toString() : '',
-                      ),
-                'capitalize',
-              )
-              as JinjaFunction)
+      (_resolveStringMember(_asString(args), 'capitalize') as JinjaFunction)
           .handler(args, kwargs),
   'truncate': _truncate,
   'wordcount': _wordcount,
@@ -217,6 +204,18 @@ JinjaValue? resolveMember(JinjaValue obj, String name) {
 
 // Implementations
 
+/// The first argument as a string value, keeping the input marking of the
+/// strings in a list or dict.
+JinjaStringValue _asString(List<JinjaValue> args) {
+  if (args.isEmpty) return JinjaStringValue.fromString('');
+  final v = args[0];
+  if (v is JinjaStringValue) return v;
+  final s = stringOf(v);
+  return hasRawInput(s)
+      ? JinjaStringValue(joinRaw([s]))
+      : JinjaStringValue.fromString(v.toString());
+}
+
 JinjaValue _replaceFilter(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
@@ -224,9 +223,62 @@ JinjaValue _replaceFilter(
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
   final obj = args[0];
   if (args.length < 3) return obj;
-  final oldVal = args[1].toString();
-  final newVal = args[2].toString();
-  return _derived(obj, obj.toString().replaceAll(oldVal, newVal));
+  final newVal = stringOf(args[2]);
+  return _derivedFrom(
+    obj,
+    _replaceIn(stringOf(obj), args[1].toString(), newVal, -1),
+    [newVal],
+  );
+}
+
+/// [s] with [old] replaced by [rep]: everywhere, as `String.replaceAll`, or
+/// at most [count] times when it is not negative. Each character keeps the
+/// input marking of the string it came from.
+JinjaString _replaceIn(JinjaString s, String old, JinjaString rep, int count) {
+  s = rawOf(s);
+  rep = rawOf(rep);
+  if (count < 0) {
+    final text = s.toString();
+    var prev = 0;
+    final parts = <JinjaStringPart>[];
+    for (final m in old.allMatches(text)) {
+      parts
+        ..addAll(s.substring(prev, m.start).parts)
+        ..addAll(rep.parts);
+      prev = m.end;
+    }
+    return JinjaString([...parts, ...s.substring(prev).parts]);
+  }
+  var res = s;
+  var start = 0;
+  for (var total = 0; total < count; total++) {
+    final idx = res.toString().indexOf(old, start);
+    if (idx == -1) break;
+    res = JinjaString([
+      ...res.substring(0, idx).parts,
+      ...rep.parts,
+      ...res.substring(idx + old.length).parts,
+    ]);
+    start = idx + rep.length;
+  }
+  return res;
+}
+
+/// [result], computed from [source] and the [inserted] strings.
+///
+/// When any of them has input-marked text still to escape, each character
+/// keeps the input marking of where it came from, so input text is escaped
+/// and template text is not. Otherwise [result] is marked as `_derived`
+/// marks it.
+JinjaStringValue _derivedFrom(
+  JinjaValue source,
+  JinjaString result, [
+  List<JinjaString> inserted = const [],
+]) {
+  if (hasRawInput(stringOf(source)) || inserted.any(hasRawInput)) {
+    return JinjaStringValue(joinRaw([result]));
+  }
+  return _derived(source, result.toString());
 }
 
 JinjaStringValue _derived(JinjaValue source, String text) {
@@ -239,8 +291,19 @@ JinjaStringValue _derived(JinjaValue source, String text) {
   );
 }
 
-JinjaStringValue _retext(JinjaStringValue source, String text) {
-  if (text.length != source.value.length) return _derived(source, text);
+/// [text], a case change of [source], with the input marking of [source].
+///
+/// When the change alters the length and [source] has input-marked text to
+/// escape, [perPart] computes it part by part instead.
+JinjaStringValue _retext(
+  JinjaStringValue source,
+  String text,
+  JinjaString Function() perPart,
+) {
+  if (text.length != source.value.length) {
+    if (hasRawInput(source.value)) return JinjaStringValue(perPart());
+    return _derived(source, text);
+  }
   final parts = <JinjaStringPart>[];
   var start = 0;
   for (final part in source.value.parts) {
@@ -293,31 +356,59 @@ JinjaValue _tojson(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final separators = separatorsArg is JinjaList || separatorsArg is JinjaTuple
       ? separatorsArg!.asList
       : const <JinjaValue>[];
-  final out = StringBuffer();
+  final out = _JsonOut();
   _writeJson(
     out,
     args[0],
     0,
     indent: indent,
     itemSep: separators.isNotEmpty
-        ? separators[0].toString()
-        : (indent < 0 ? ', ' : ','),
-    keySep: separators.length > 1 ? separators[1].toString() : ': ',
+        ? stringOf(separators[0])
+        : JinjaString.template(indent < 0 ? ', ' : ','),
+    keySep: separators.length > 1
+        ? stringOf(separators[1])
+        : JinjaString.template(': '),
     ensureAscii: arg('ensure_ascii', 1)?.asBool ?? false,
     sortKeys: arg('sort_keys', 4)?.asBool ?? false,
   );
-  return JinjaStringValue(
-    JinjaString([JinjaStringPart(out.toString(), false)], isSafe: true),
-  );
+  final json = joinRaw(out.pieces);
+  // Without input-marked text the output is safe template text, as before.
+  if (!json.parts.any((p) => p.isInput)) {
+    return JinjaStringValue(
+      JinjaString([JinjaStringPart(json.toString(), false)], isSafe: true),
+    );
+  }
+  return JinjaStringValue(json);
+}
+
+/// JSON output that keeps the input marking of the strings written to it.
+class _JsonOut {
+  final List<JinjaString> pieces = [];
+
+  void write(Object text) => pieces.add(JinjaString.template('$text'));
+
+  void writeString(JinjaString s, bool ensureAscii) {
+    write('"');
+    pieces.add(
+      JinjaString([
+        for (final p in rawOf(s).parts)
+          JinjaStringPart(
+            jsonEscape(p.val, ensureAscii: ensureAscii),
+            p.isInput,
+          ),
+      ]),
+    );
+    write('"');
+  }
 }
 
 void _writeJson(
-  StringBuffer out,
+  _JsonOut out,
   JinjaValue v,
   int level, {
   required int indent,
-  required String itemSep,
-  required String keySep,
+  required JinjaString itemSep,
+  required JinjaString keySep,
   required bool ensureAscii,
   required bool sortKeys,
 }) {
@@ -335,7 +426,7 @@ void _writeJson(
       for (var i = 0; i < items.length; i++) {
         out.write(pad * (level + 1));
         writeItem(items[i]);
-        if (i < items.length - 1) out.write(itemSep);
+        if (i < items.length - 1) out.pieces.add(itemSep);
         out.write(newline);
       }
       out.write(pad * level);
@@ -361,16 +452,19 @@ void _writeJson(
   } else if (v is JinjaFloat) {
     out.write(_formatDouble(v.value));
   } else if (v is JinjaStringValue) {
-    out.write('"${jsonEscape(v.toString(), ensureAscii: ensureAscii)}"');
+    out.writeString(v.value, ensureAscii);
   } else if (v is JinjaList || v is JinjaTuple) {
     writeItems('[', ']', v.asList, writeValue);
   } else if (v is JinjaMap) {
     final entries = v.items.entries
-        .map((e) => MapEntry(e.key.toString(), e.value))
+        .map((e) => MapEntry(stringOf(e.key), e.value))
         .toList();
-    if (sortKeys) entries.sort((a, b) => a.key.compareTo(b.key));
-    writeItems('{', '}', entries, (MapEntry<String, JinjaValue> e) {
-      out.write('"${jsonEscape(e.key, ensureAscii: ensureAscii)}"$keySep');
+    if (sortKeys) {
+      entries.sort((a, b) => a.key.toString().compareTo(b.key.toString()));
+    }
+    writeItems('{', '}', entries, (MapEntry<JinjaString, JinjaValue> e) {
+      out.writeString(e.key, ensureAscii);
+      out.pieces.add(keySep);
       writeValue(e.value);
     });
   } else {
@@ -462,15 +556,7 @@ JinjaValue _list(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final arg = args[0];
   if (arg is JinjaList) return arg;
   if (arg is JinjaTuple) return JinjaList(List.from(arg.items));
-  if (arg is JinjaStringValue) {
-    return JinjaList(
-      arg.value.parts
-          .map((p) => p.val)
-          .expand((s) => s.split(''))
-          .map((c) => JinjaStringValue.fromString(c))
-          .toList(),
-    );
-  }
+  if (arg is JinjaStringValue) return JinjaList(charsOf(arg.value));
   if (arg is JinjaMap) {
     // list(dict) -> keys
     return JinjaList(
@@ -519,7 +605,7 @@ JinjaValue _float(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 
 JinjaValue _str(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
-  return JinjaStringValue.fromString(args[0].toString());
+  return JinjaStringValue(joinRaw([stringOf(args[0])]));
 }
 
 JinjaValue _len(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -537,7 +623,7 @@ JinjaValue _first(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final v = args[0];
   if (v is JinjaList && v.items.isNotEmpty) return v.items.first;
   if (v is JinjaStringValue && v.value.length > 0) {
-    return JinjaStringValue.fromString(v.value.toString()[0]);
+    return JinjaStringValue(rawOf(v.value)[0]);
   }
   if (v is JinjaTuple && v.items.isNotEmpty) return v.items.first;
   return const JinjaUndefined();
@@ -548,9 +634,7 @@ JinjaValue _last(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final v = args[0];
   if (v is JinjaList && v.items.isNotEmpty) return v.items.last;
   if (v is JinjaStringValue && v.value.length > 0) {
-    return JinjaStringValue.fromString(
-      v.value.toString().substring(v.value.length - 1),
-    );
+    return JinjaStringValue(rawOf(v.value)[v.value.length - 1]);
   }
   if (v is JinjaTuple && v.items.isNotEmpty) return v.items.last;
   return const JinjaUndefined();
@@ -739,11 +823,7 @@ JinjaValue _unique(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (collection is JinjaList || collection is JinjaTuple) {
     items = collection.asList;
   } else if (collection is JinjaStringValue) {
-    items = [
-      for (final part in collection.value.parts)
-        for (final char in part.val.split(''))
-          JinjaStringValue(JinjaString([JinjaStringPart(char, part.isInput)])),
-    ];
+    items = charsOf(collection.value);
   } else if (collection is JinjaMap) {
     items = collection.items.keys.toList();
   } else if (collection.isNone) {
@@ -783,8 +863,8 @@ JinjaValue _reverse(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   final v = args[0];
   if (v is JinjaList) return JinjaList(v.items.reversed.toList());
   if (v is JinjaStringValue) {
-    return JinjaStringValue.fromString(
-      v.value.toString().split('').reversed.join(''),
+    return JinjaStringValue(
+      joinRaw(charsOf(v.value).reversed.map((c) => stringOf(c))),
     );
   }
   return v;
@@ -976,11 +1056,13 @@ JinjaValue _join(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
   final collection = args[0];
   if (collection is! JinjaList && collection is! JinjaTuple) {
-    return JinjaStringValue.fromString(collection.toString());
+    return JinjaStringValue(joinRaw([stringOf(collection)]));
   }
 
-  final delimiter =
-      (kwargs['d'] ?? (args.length > 1 ? args[1] : null))?.toString() ?? '';
+  final delimiterArg = kwargs['d'] ?? (args.length > 1 ? args[1] : null);
+  final delimiter = delimiterArg == null
+      ? JinjaString.template('')
+      : stringOf(delimiterArg);
   final attribute =
       kwargs['attribute']?.toString() ??
       (args.length > 2 ? args[2].toString() : null);
@@ -989,14 +1071,16 @@ JinjaValue _join(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
       ? collection.items
       : (collection as JinjaTuple).items;
 
-  final strings = items
-      .map((e) {
-        final val = attribute != null ? _resolveAttribute(e, attribute) : e;
-        return val.toString();
-      })
-      .join(delimiter);
-
-  return JinjaStringValue.fromString(strings);
+  return JinjaStringValue(
+    joinRaw([
+      for (var i = 0; i < items.length; i++) ...[
+        if (i > 0) delimiter,
+        stringOf(
+          attribute != null ? _resolveAttribute(items[i], attribute) : items[i],
+        ),
+      ],
+    ]),
+  );
 }
 
 JinjaValue _safe(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -1005,6 +1089,7 @@ JinjaValue _safe(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   }
   final v = args[0];
   if (v is JinjaStringValue) {
+    if (isRendered(v.value)) return JinjaStringValue(v.value.escape());
     return JinjaStringValue(v.value.markSafe());
   }
   return JinjaStringValue(JinjaString.from(v.toString(), isSafe: true));
@@ -1280,7 +1365,8 @@ JinjaValue _testIsEscaped(
   Map<String, JinjaValue> kwargs,
 ) {
   if (args.isEmpty) return const JinjaBoolean(false);
-  return JinjaBoolean(args[0].isSafe);
+  final v = args[0];
+  return JinjaBoolean(v.isSafe || v is JinjaStringValue && isRendered(v.value));
 }
 
 JinjaValue _testIsFilter(
@@ -1455,13 +1541,14 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
         final maxsplit =
             kwargs['maxsplit']?.asInt ?? (args.length > 1 ? args[1].asInt : -1);
 
-        String s = obj.value.toString();
-        List<String> parts;
+        final src = rawOf(obj.value);
+        final s = src.toString();
+        List<JinjaString> parts;
         if (delimiter == null || delimiter == ' ') {
           // split by whitespace
-          parts = s.trim().split(RegExp(r'\s+'));
+          parts = _splitWhitespace(src);
           if (maxsplit >= 0 && parts.length > maxsplit + 1) {
-            final rest = parts.sublist(maxsplit).join(' ');
+            final rest = _joinSpaces(parts.sublist(maxsplit));
             parts = parts.sublist(0, maxsplit)..add(rest);
           }
         } else {
@@ -1472,20 +1559,18 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
             for (int i = 0; i < maxsplit; i++) {
               int idx = s.indexOf(delimiter, start);
               if (idx == -1) break;
-              parts.add(s.substring(start, idx));
+              parts.add(src.substring(start, idx));
               start = idx + delimiter.length;
             }
-            parts.add(s.substring(start));
+            parts.add(src.substring(start));
           } else {
-            parts = s.split(delimiter);
+            parts = _splitOn(src, delimiter);
           }
         }
 
         return JinjaList([
           for (var i = 0; i < parts.length; i++)
-            i == parts.length - 1
-                ? _derived(obj, parts[i])
-                : JinjaStringValue.fromString(parts[i]),
+            _splitPiece(obj, parts[i], last: i == parts.length - 1),
         ]);
       });
     case 'rsplit':
@@ -1494,13 +1579,14 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
         final maxsplit =
             kwargs['maxsplit']?.asInt ?? (args.length > 1 ? args[1].asInt : -1);
 
-        String s = obj.value.toString();
-        List<String> parts;
+        final src = rawOf(obj.value);
+        final s = src.toString();
+        List<JinjaString> parts;
         if (delimiter == null || delimiter == ' ') {
           // rsplit by whitespace
-          parts = s.trim().split(RegExp(r'\s+'));
+          parts = _splitWhitespace(src);
           if (maxsplit >= 0 && parts.length > maxsplit + 1) {
-            final rest = parts.sublist(0, parts.length - maxsplit).join(' ');
+            final rest = _joinSpaces(parts.sublist(0, parts.length - maxsplit));
             parts = [rest, ...parts.sublist(parts.length - maxsplit)];
           }
         } else {
@@ -1510,26 +1596,28 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
             for (int i = 0; i < maxsplit; i++) {
               int idx = s.lastIndexOf(delimiter, end - 1);
               if (idx == -1) break;
-              parts.insert(0, s.substring(idx + delimiter.length, end));
+              parts.insert(0, src.substring(idx + delimiter.length, end));
               end = idx;
             }
-            parts.insert(0, s.substring(0, end));
+            parts.insert(0, src.substring(0, end));
           } else {
-            parts = s.split(delimiter);
+            parts = _splitOn(src, delimiter);
           }
         }
         return JinjaList([
           for (var i = 0; i < parts.length; i++)
-            i == 0
-                ? _derived(obj, parts[i])
-                : JinjaStringValue.fromString(parts[i]),
+            _splitPiece(obj, parts[i], last: i == 0),
         ]);
       });
     case 'capitalize':
       return JinjaFunction('capitalize', (args, kwargs) {
         final s = obj.value.toString();
         if (s.isEmpty) return obj;
-        return _retext(obj, s[0].toUpperCase() + s.substring(1).toLowerCase());
+        return _retext(
+          obj,
+          s[0].toUpperCase() + s.substring(1).toLowerCase(),
+          () => _capitalized(obj.value),
+        );
       });
     case 'title':
       return JinjaFunction('title', (args, kwargs) {
@@ -1543,6 +1631,18 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
                 return w[0].toUpperCase() + w.substring(1).toLowerCase();
               })
               .join(' '),
+          () {
+            final words = <JinjaString>[];
+            var start = 0;
+            for (final w in s.split(' ')) {
+              if (start > 0) words.add(obj.value.substring(start - 1, start));
+              words.add(
+                _capitalized(obj.value.substring(start, start + w.length)),
+              );
+              start += w.length + 1;
+            }
+            return joinRaw(words);
+          },
         );
       });
     case 'format':
@@ -1550,67 +1650,113 @@ JinjaValue? _resolveStringMember(JinjaStringValue obj, String name) {
     case 'replace':
       return JinjaFunction('replace', (args, kwargs) {
         if (args.length < 2) return obj;
-        final oldVal = args[0].toString();
-        final newVal = args[1].toString();
+        final newVal = stringOf(args[1]);
         final count =
             kwargs['count']?.asInt ?? (args.length > 2 ? args[2].asInt : -1);
-
-        String s = obj.value.toString();
-        if (count >= 0) {
-          String res = s;
-          int total = 0;
-          int start = 0;
-          while (total < count) {
-            int idx = res.indexOf(oldVal, start);
-            if (idx == -1) break;
-            res = res.replaceRange(idx, idx + oldVal.length, newVal);
-            start = idx + newVal.length;
-            total++;
-          }
-          return _derived(obj, res);
-        }
-
-        return _derived(obj, s.replaceAll(oldVal, newVal));
+        return _derivedFrom(
+          obj,
+          _replaceIn(obj.value, args[0].toString(), newVal, count),
+          [newVal],
+        );
       });
   }
   return null;
 }
 
+/// `s.trim().split(RegExp(r'\s+'))`, keeping input marking.
+List<JinjaString> _splitWhitespace(JinjaString s) {
+  final text = s.toString();
+  final trimmed = text.trim();
+  final lead = text.length - text.trimLeft().length;
+  final src = s.substring(lead, lead + trimmed.length);
+  final pieces = <JinjaString>[];
+  var prev = 0;
+  for (final m in RegExp(r'\s+').allMatches(trimmed)) {
+    pieces.add(src.substring(prev, m.start));
+    prev = m.end;
+  }
+  return pieces..add(src.substring(prev));
+}
+
+/// `s.split(delimiter)`, keeping input marking.
+List<JinjaString> _splitOn(JinjaString s, String delimiter) {
+  final text = s.toString();
+  if (delimiter.isEmpty) {
+    return [for (var i = 0; i < text.length; i++) s.substring(i, i + 1)];
+  }
+  final pieces = <JinjaString>[];
+  var prev = 0;
+  for (final m in delimiter.allMatches(text)) {
+    pieces.add(s.substring(prev, m.start));
+    prev = m.end;
+  }
+  return pieces..add(s.substring(prev));
+}
+
+/// [pieces] joined with single spaces.
+JinjaString _joinSpaces(List<JinjaString> pieces) => JinjaString([
+  for (var i = 0; i < pieces.length; i++) ...[
+    if (i > 0) const JinjaStringPart(' ', false),
+    ...pieces[i].parts,
+  ],
+]);
+
+/// A piece of a `split` or `rsplit` of [source].
+///
+/// With input-marked text still to escape, the piece keeps its marking.
+/// Otherwise only the [last] piece split off, the remainder, is marked, as
+/// in llama.cpp: as input when all of [source] is.
+JinjaStringValue _splitPiece(
+  JinjaStringValue source,
+  JinjaString piece, {
+  required bool last,
+}) {
+  if (hasRawInput(source.value)) return JinjaStringValue(joinRaw([piece]));
+  if (last) return _derived(source, piece.toString());
+  return JinjaStringValue.fromString(piece.toString());
+}
+
+/// [s] with its first character upper case and the rest lower case, changed
+/// part by part.
+JinjaString _capitalized(JinjaString s) =>
+    joinRaw([s.substring(0, 1).toUpperCase(), s.substring(1).toLowerCase()]);
+
+/// Formats [args] into the `{}` placeholders of [fmt]. The literal text and
+/// each argument keep their input marking.
 JinjaStringValue _format(JinjaStringValue fmt, List<JinjaValue> args) {
-  final literalIsInput = fmt.value.allPartsAreInput;
-  final source = fmt.value.toString();
+  final format = rawOf(fmt.value);
+  final source = format.toString();
   final parts = <JinjaStringPart>[];
-  final literal = StringBuffer();
-  void flushLiteral() {
-    if (literal.isEmpty) return;
-    parts.add(JinjaStringPart(literal.toString(), literalIsInput));
-    literal.clear();
+  var literalStart = 0;
+  void flushLiteral(int end) {
+    parts.addAll(format.substring(literalStart, end).parts);
   }
 
   var next = 0;
   for (var i = 0; i < source.length; i++) {
-    if (source[i] != '{') {
-      literal.write(source[i]);
-      continue;
-    }
+    if (source[i] != '{') continue;
     if (i + 1 >= source.length || source[i + 1] != '}') {
       throw Exception("format() only supports simple '{}' placeholders");
     }
-    i++;
     if (next >= args.length) {
       throw Exception(
         'format() expected at least ${next + 1} arguments, got ${args.length}',
       );
     }
-    flushLiteral();
+    flushLiteral(i);
+    i++;
+    literalStart = i + 1;
     final arg = args[next++];
+    final text = stringOf(arg);
     parts.addAll(
       arg is JinjaStringValue
-          ? arg.value.parts
+          ? rawOf(text).parts
+          : hasRawInput(text)
+          ? joinRaw([text]).parts
           : [JinjaStringPart('$arg', false)],
     );
   }
-  flushLiteral();
+  flushLiteral(source.length);
   return JinjaStringValue(JinjaString(parts));
 }
 
@@ -1640,6 +1786,9 @@ JinjaValue _strip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 
   if (chars == null) {
     if (v is JinjaStringValue) return JinjaStringValue(v.value.trim());
+    if (hasRawInput(stringOf(v))) {
+      return JinjaStringValue(_asString(args).value.trim());
+    }
     return JinjaStringValue.fromString(v.toString().trim());
   }
 
@@ -1654,8 +1803,13 @@ JinjaValue _strip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   while (end > start && charSet.contains(s[end - 1])) {
     end--;
   }
-  return JinjaStringValue.fromString(s.substring(start, end));
+  return _codeUnits(v, start, end);
 }
+
+/// Code units [start] to [end] of [v]'s string form, keeping their input
+/// marking.
+JinjaStringValue _codeUnits(JinjaValue v, int start, [int? end]) =>
+    JinjaStringValue(joinRaw([stringOf(v).substring(start, end)]));
 
 JinjaValue _lstrip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
@@ -1666,6 +1820,9 @@ JinjaValue _lstrip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 
   if (chars == null) {
     if (v is JinjaStringValue) return JinjaStringValue(v.value.trimLeft());
+    if (hasRawInput(stringOf(v))) {
+      return JinjaStringValue(_asString(args).value.trimLeft());
+    }
     return JinjaStringValue.fromString(v.toString().trimLeft());
   }
 
@@ -1675,7 +1832,7 @@ JinjaValue _lstrip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   while (start < s.length && charSet.contains(s[start])) {
     start++;
   }
-  return JinjaStringValue.fromString(s.substring(start));
+  return _codeUnits(v, start);
 }
 
 JinjaValue _rstrip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -1687,6 +1844,9 @@ JinjaValue _rstrip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 
   if (chars == null) {
     if (v is JinjaStringValue) return JinjaStringValue(v.value.trimRight());
+    if (hasRawInput(stringOf(v))) {
+      return JinjaStringValue(_asString(args).value.trimRight());
+    }
     return JinjaStringValue.fromString(v.toString().trimRight());
   }
 
@@ -1696,7 +1856,7 @@ JinjaValue _rstrip(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   while (end > 0 && charSet.contains(s[end - 1])) {
     end--;
   }
-  return JinjaStringValue.fromString(s.substring(0, end));
+  return _codeUnits(v, 0, end);
 }
 
 JinjaValue? _resolveNoneMember(JinjaNone obj, String name) {
@@ -1716,9 +1876,63 @@ JinjaValue? _resolveNoneMember(JinjaNone obj, String name) {
   return null;
 }
 
+/// The members of undefined in llama.cpp, which return an empty value of
+/// the filter's result type.
+final Map<String, JinjaValue> _undefinedMembers = {
+  for (final name in [
+    'capitalize',
+    'join',
+    'lower',
+    'replace',
+    'safe',
+    'string',
+    'strip',
+    'title',
+    'truncate',
+    'upper',
+  ])
+    name: const JinjaStringValue(JinjaString([])),
+  for (final name in [
+    'items',
+    'list',
+    'map',
+    'reject',
+    'rejectattr',
+    'reverse',
+    'select',
+    'selectattr',
+    'sort',
+    'unique',
+  ])
+    name: const JinjaList([]),
+  for (final name in ['length', 'sum', 'wordcount'])
+    name: const JinjaInteger(0),
+  for (final name in ['first', 'last', 'max', 'min'])
+    name: const JinjaUndefined(),
+};
+
 JinjaValue? _resolveUndefinedMember(JinjaUndefined obj, String name) {
-  // undefined methods mostly return undefined or empty
-  return JinjaFunction(name, (args, kwargs) => const JinjaUndefined());
+  if (name == 'default') {
+    return _UndefinedMember(
+      name,
+      (args, kwargs) => _default([obj, ...args], kwargs),
+    );
+  }
+  final empty = _undefinedMembers[name];
+  if (empty == null) return null;
+  return _UndefinedMember(name, (args, kwargs) {
+    // A new list, as a template may append to it.
+    return empty is JinjaList ? JinjaList([]) : empty;
+  });
+}
+
+/// A member of undefined, such as `x.upper` for an undefined `x`. As in
+/// llama.cpp, it prints as nothing.
+class _UndefinedMember extends JinjaFunction {
+  const _UndefinedMember(super.name, super.handler);
+
+  @override
+  String toString() => '';
 }
 
 JinjaValue _namespace(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
@@ -1799,8 +2013,8 @@ JinjaValue _dictsort(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _upper(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
   final v = args[0];
-  if (v is JinjaStringValue) {
-    return JinjaStringValue(v.value.toUpperCase());
+  if (v is JinjaStringValue || hasRawInput(stringOf(v))) {
+    return JinjaStringValue(_asString(args).value.toUpperCase());
   }
   return JinjaStringValue.fromString(v.toString().toUpperCase());
 }
@@ -1808,15 +2022,16 @@ JinjaValue _upper(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 JinjaValue _lower(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
   final v = args[0];
-  if (v is JinjaStringValue) {
-    return JinjaStringValue(v.value.toLowerCase());
+  if (v is JinjaStringValue || hasRawInput(stringOf(v))) {
+    return JinjaStringValue(_asString(args).value.toLowerCase());
   }
   return JinjaStringValue.fromString(v.toString().toLowerCase());
 }
 
 JinjaValue _indent(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
-  final str = args[0].toString();
+  final source = rawOf(stringOf(args[0]));
+  final str = source.toString();
   final width = args.length > 1 ? args[1] : kwargs['width'];
   final first = args.length > 2
       ? args[2].asBool
@@ -1826,30 +2041,44 @@ JinjaValue _indent(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
       : (kwargs['blank']?.asBool ?? false);
 
   final indentStr = width is JinjaStringValue
-      ? width.toString()
-      : ' ' * (width?.asInt ?? 4);
-  final lines = str.isEmpty ? <String>[] : str.split('\n');
+      ? width.value
+      : JinjaString.template(' ' * (width?.asInt ?? 4));
+  // Each line as a slice of [source], and the newline after it.
+  final lines = <JinjaString>[];
+  final newlines = <JinjaString>[];
+  if (str.isNotEmpty) {
+    var start = 0;
+    for (final m in '\n'.allMatches(str)) {
+      lines.add(source.substring(start, m.start));
+      newlines.add(source.substring(m.start, m.end));
+      start = m.end;
+    }
+    lines.add(source.substring(start));
+  }
   final trailingNewline = str.endsWith('\n');
   if (trailingNewline) lines.removeLast();
-  final buffer = StringBuffer();
+  final out = <JinjaString>[];
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
-    if (i > 0) buffer.write('\n');
-    if (i == 0 ? first : (line.isNotEmpty || blank)) buffer.write(indentStr);
-    buffer.write(line);
+    if (i > 0) out.add(newlines[i - 1]);
+    if (i == 0 ? first : (line.length > 0 || blank)) out.add(indentStr);
+    out.add(line);
   }
   if (trailingNewline) {
-    buffer.write('\n');
-    if (blank) buffer.write(indentStr);
+    out.add(newlines.last);
+    if (blank) out.add(indentStr);
   }
 
-  return _derived(args[0], buffer.toString());
+  return _derivedFrom(
+    args[0],
+    JinjaString([for (final piece in out) ...rawOf(piece).parts]),
+    [indentStr],
+  );
 }
 
 JinjaValue _string(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   if (args.isEmpty) return const JinjaStringValue(JinjaString([]));
-  if (args[0] is JinjaStringValue) return args[0];
-  return JinjaStringValue.fromString(args[0].toString());
+  return _asString(args);
 }
 
 JinjaValue _strftime_now(
@@ -1867,6 +2096,10 @@ JinjaValue _strftime_now(
   // llama.cpp formats into a 100-byte buffer and fails on an empty result.
   if (result.isEmpty || utf8.encode(result).length >= 100) {
     throw Exception('strftime_now: failed to format time');
+  }
+  // Text of an input-marked format may pass through, so it is escaped.
+  if (hasRawInput(format.value)) {
+    return JinjaStringValue(JinjaString.user(result));
   }
   return JinjaStringValue(JinjaString.from(result, isSafe: true));
 }
@@ -1890,25 +2123,27 @@ JinjaValue _truncate(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
       kwargs['length']?.asInt ?? (args.length > 1 ? args[1].asInt : 255);
   final killwords =
       kwargs['killwords']?.asBool ?? (args.length > 2 ? args[2].asBool : false);
-  final end =
-      kwargs['end']?.toString() ??
-      (args.length > 3 ? args[3].toString() : '...');
+  final endArg = kwargs['end'] ?? (args.length > 3 ? args[3] : null);
+  final end = endArg == null ? JinjaString.template('...') : stringOf(endArg);
 
   if (s.length <= length) return args[0];
 
-  String res;
+  int keep;
   if (killwords) {
-    res = s.substring(0, length - end.length);
+    keep = length - end.length;
   } else {
     // find last whitespace before length
     int lastSpace = s.lastIndexOf(' ', length - end.length);
     if (lastSpace == -1) {
-      res = s.substring(0, length - end.length);
+      keep = length - end.length;
     } else {
-      res = s.substring(0, lastSpace);
+      keep = lastSpace;
     }
   }
-  return JinjaStringValue.fromString(res + end);
+  final kept = s.substring(0, keep);
+  return JinjaStringValue(
+    joinRaw([stringOf(args[0]).substring(0, kept.length), end]),
+  );
 }
 
 JinjaValue _wordcount(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {

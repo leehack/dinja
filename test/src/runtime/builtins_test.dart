@@ -920,18 +920,6 @@ void main() {
         },
         '[\n    {\n        "type": "function",\n        "function": {\n            "name": "get_weather",\n            "description": "Get the weather in a city, e.g. \\"Montréal\\" <or> \'Paris\' & more",\n            "parameters": {\n                "type": "object",\n                "properties": {\n                    "city": {\n                        "type": "string",\n                        "description": "City name"\n                    },\n                    "days": {\n                        "type": "integer",\n                        "minimum": 1,\n                        "maximum": 7,\n                        "default": 1.5\n                    }\n                },\n                "required": [\n                    "city"\n                ]\n            }\n        }\n    }\n]',
       ),
-      (
-        'input-marked strings are not escaped',
-        '{{ x | tojson }}',
-        {
-          'x': {
-            't': [
-              {'d': JinjaString.user('<x>')},
-            ],
-          },
-        },
-        '{"t": [{"d": "<x>"}]}',
-      ),
     ];
     for (final (name, source, data, expected) in cases) {
       test(name, () => expect(Template(source).render(data), expected));
@@ -1291,6 +1279,160 @@ void main() {
       test('renders $source', () {
         expect(Template(source).render({'x': null}), expected);
       });
+    });
+  });
+  group('tojson keeps input marking', () {
+    // llama.cpp 7fe450e19 gives each output with the input unescaped, as
+    // its tojson drops the marking and it never escapes. Only the input
+    // text is escaped, after JSON escaping; the JSON's own quotes are not.
+    final x = JinjaString.user('<b>');
+    final cases = <(String, Map<String, dynamic>, String)>[
+      ('{{ x | tojson }}', {'x': x}, '"&lt;b&gt;"'),
+      ('{{ {"k": x} | tojson }}', {'x': x}, '{"k": "&lt;b&gt;"}'),
+      (
+        '{{ d | tojson }}',
+        {
+          'd': {JinjaString.user('<k>'): 1},
+        },
+        '{"&lt;k&gt;": 1}',
+      ),
+      (
+        '{{ d | tojson }}',
+        {
+          'd': {
+            'a': [
+              x,
+              {'c': x},
+            ],
+          },
+        },
+        '{"a": ["&lt;b&gt;", {"c": "&lt;b&gt;"}]}',
+      ),
+      (
+        '{{ x | tojson }}',
+        {'x': JinjaString.user('"q"')},
+        r'"\&quot;q\&quot;"',
+      ),
+      (
+        '{{ x | tojson(ensure_ascii=true) }}',
+        {'x': JinjaString.user('é<')},
+        r'"\u00e9&lt;"',
+      ),
+      (
+        '{{ {"k": x} | tojson(indent=2) }}',
+        {'x': x},
+        '{\n  "k": "&lt;b&gt;"\n}',
+      ),
+      (
+        '{{ [x, 1] | tojson(separators=(sep, ":")) }}',
+        {'x': x, 'sep': JinjaString.user(';<')},
+        '["&lt;b&gt;";&lt;1]',
+      ),
+      (
+        '{{ {x: 1} | tojson(separators=(",", sep)) }}',
+        {'x': x, 'sep': JinjaString.user(':<')},
+        '{"&lt;b&gt;":&lt;1}',
+      ),
+      (
+        '{{ [x, 1] | tojson(separators=("<,>", ":")) }}',
+        {'x': x},
+        '["&lt;b&gt;"<,>1]',
+      ),
+      // llama.cpp does not implement sort_keys.
+      (
+        '{{ d | tojson(sort_keys=true) }}',
+        {
+          'd': {'b': 1, JinjaString.user('<a>'): x},
+        },
+        '{"&lt;a&gt;": "&lt;b&gt;", "b": 1}',
+      ),
+      ('{{ x | tojson | safe }}', {'x': x}, '"<b>"'),
+    ];
+    for (final (source, data, expected) in cases) {
+      test('renders $source', () {
+        expect(Template(source).render(data), expected);
+      });
+    }
+
+    test('marks only the input text', () {
+      final result = Template(
+        '{{ {"k": x} | tojson }}',
+      ).renderJinjaResult({'x': x});
+      expect(result.parts, [
+        const JinjaStringPart('{"k": "', false),
+        const JinjaStringPart('&lt;b&gt;', true),
+        const JinjaStringPart('"}', false),
+      ]);
+    });
+
+    test('is safe template text without input', () {
+      const source = '{{ d | tojson }}|{{ d | tojson is escaped }}';
+      final data = {
+        'd': {'<k>': '<b>'},
+      };
+      expect(Template(source).render(data), '{"<k>": "<b>"}|True');
+    });
+  });
+
+  group('join keeps input marking', () {
+    // llama.cpp 7fe450e19 gives each output with the input unescaped, as
+    // its join drops the marking and it never escapes. It does not map with
+    // a filter, join a string, or join none or a list.
+    final x = JinjaString.user('<b>');
+    final cases = <(String, Map<String, dynamic>, String)>[
+      ('{{ [x, "<i>"] | join }}', {'x': x}, '&lt;b&gt;<i>'),
+      (
+        '{{ [x, x] | join(sep) }}',
+        {'x': x, 'sep': JinjaString.user('<,>')},
+        '&lt;b&gt;&lt;,&gt;&lt;b&gt;',
+      ),
+      ('{{ [x, x] | join("<,>") }}', {'x': x}, '&lt;b&gt;<,>&lt;b&gt;'),
+      (
+        '{{ l | map("upper") | join }}',
+        {
+          'l': [JinjaString.user('<a>'), x],
+        },
+        '&lt;A&gt;&lt;B&gt;',
+      ),
+      (
+        '{{ d | map(attribute="n") | join(", ") }}',
+        {
+          'd': [
+            {'n': JinjaString.user('<a>')},
+            {'n': x},
+          ],
+        },
+        '&lt;a&gt;, &lt;b&gt;',
+      ),
+      (
+        '{{ d | join(", ", attribute="n") }}',
+        {
+          'd': [
+            {'n': x},
+          ],
+        },
+        '&lt;b&gt;',
+      ),
+      ('{{ [x, 1, none] | join }}', {'x': x}, '&lt;b&gt;1None'),
+      ('{{ [[x]] | join }}', {'x': x}, "['&lt;b&gt;']"),
+      ('{{ x | join }}', {'x': x}, '&lt;b&gt;'),
+      ('{{ [x | safe] | join }}', {'x': x}, '<b>'),
+    ];
+    for (final (source, data, expected) in cases) {
+      test('renders $source', () {
+        expect(Template(source).render(data), expected);
+      });
+    }
+
+    test('marks only the input text', () {
+      final result = Template(
+        '{{ [x, x] | join(", ") }}',
+      ).renderJinjaResult({'x': x});
+      expect(result.parts, [
+        const JinjaStringPart('&lt;b&gt;', true),
+        const JinjaStringPart(', ', false),
+        const JinjaStringPart('&lt;b&gt;', true),
+      ]);
     });
   });
 }
