@@ -1329,6 +1329,11 @@ void main() {
         '["&lt;b&gt;";&lt;1]',
       ),
       (
+        '{{ {x: 1} | tojson(separators=(",", sep)) }}',
+        {'x': x, 'sep': JinjaString.user(':<')},
+        '{"&lt;b&gt;":&lt;1}',
+      ),
+      (
         '{{ [x, 1] | tojson(separators=("<,>", ":")) }}',
         {'x': x},
         '["&lt;b&gt;"<,>1]',

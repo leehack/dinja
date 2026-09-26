@@ -24,6 +24,10 @@ void main() {
       '{{ ("a" ~ x).format() }}|{{ [x] | upper }}|{{ [x] | trim }}':
           "a&lt;b&gt;|['&lt;B&gt;']|['&lt;b&gt;']",
       '{{ (x ~ "a") | capitalize }}': '&lt;b&gt;a',
+      "{{ 'a-a'.replace('a', x, 1) }}|{{ 'abc'.replace('b', x) }}|{{ 'a\\nb' | indent(x) }}":
+          '&lt;b&gt;-a|a&lt;b&gt;c|a\n&lt;b&gt;b',
+      '{{ [x] | lower }}|{{ [x] | lstrip }}|{{ [x] | rstrip }}':
+          "['&lt;b&gt;']|['&lt;b&gt;']|['&lt;b&gt;']",
     };
     cases.forEach((source, expected) {
       test('renders $source', () {
@@ -37,6 +41,15 @@ void main() {
         '{{ (x ~ "a") | capitalize }}|{{ (x ~ " a") | title }}',
       ).render({'x': JinjaString.user('ß<')});
       expect(out, matches(RegExp(r'^(SS|ß)&lt;a\|(SS|ß)&lt; A$')));
+    });
+
+    test('merged into parts', () {
+      final result = Template('{{ [x] | lower }}').renderJinjaResult(values);
+      expect(result.parts.map((p) => (p.val, p.isInput)), [
+        ("['", false),
+        ('&lt;b&gt;', true),
+        ("']", false),
+      ]);
     });
 
     test('in a dict key', () {
@@ -84,11 +97,19 @@ void main() {
       '{{ (x ~ (y | safe)) | list | join }}': '&lt;b&gt;<i>',
       '{{ "a" | indent(x ~ (y | safe), true) }}': '&lt;b&gt;<i>a',
       '{{ (x | safe)[::2] }}': '<>',
+      '{{ strftime_now((x ~ "%Y") | safe)[:3] }}': '<b>',
     };
     cases.forEach((source, expected) {
       test('renders $source', () {
         expect(Template(source).render(values), expected);
       });
+    });
+
+    test('keeps the marking of safe text, as llama.cpp does', () {
+      final result = Template(
+        "{{ (x | safe) | replace('b', 'i') }}",
+      ).renderJinjaResult(values);
+      expect(result.parts.map((p) => (p.val, p.isInput)), [('<i>', true)]);
     });
   });
 
@@ -153,6 +174,9 @@ void main() {
       '{% macro m() %}{{ caller() | trim }}{% endmacro %}'
           '{% call m() %}{{ E }}{% endcall %}',
       '{% filter upper %}{{ E }}{% endfilter %}',
+      '{% filter safe %}{{ E }}{% endfilter %}',
+      '{% set s %}{{ E }}[T]{% endset %}{{ s | safe }}{{ (s ~ x) | safe }}',
+      '{% macro m() %}{{ E }}{% endmacro %}{{ m() | upper | safe }}',
       '{% filter replace("b", "[") %}{{ E }}{% endfilter %}',
       '{% filter tojson %}{{ E }}{% endfilter %}',
       '{{ (E) | string }}',

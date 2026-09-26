@@ -212,7 +212,7 @@ JinjaStringValue _asString(List<JinjaValue> args) {
   if (v is JinjaStringValue) return v;
   final s = stringOf(v);
   return hasRawInput(s)
-      ? JinjaStringValue(s)
+      ? JinjaStringValue(joinRaw([s]))
       : JinjaStringValue.fromString(v.toString());
 }
 
@@ -1089,6 +1089,7 @@ JinjaValue _safe(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   }
   final v = args[0];
   if (v is JinjaStringValue) {
+    if (isRendered(v.value)) return JinjaStringValue(v.value.escape());
     return JinjaStringValue(v.value.markSafe());
   }
   return JinjaStringValue(JinjaString.from(v.toString(), isSafe: true));
@@ -1364,7 +1365,8 @@ JinjaValue _testIsEscaped(
   Map<String, JinjaValue> kwargs,
 ) {
   if (args.isEmpty) return const JinjaBoolean(false);
-  return JinjaBoolean(args[0].isSafe);
+  final v = args[0];
+  return JinjaBoolean(v.isSafe || v is JinjaStringValue && isRendered(v.value));
 }
 
 JinjaValue _testIsFilter(
@@ -1744,7 +1746,15 @@ JinjaStringValue _format(JinjaStringValue fmt, List<JinjaValue> args) {
     flushLiteral(i);
     i++;
     literalStart = i + 1;
-    parts.addAll(rawOf(stringOf(args[next++])).parts);
+    final arg = args[next++];
+    final text = stringOf(arg);
+    parts.addAll(
+      arg is JinjaStringValue
+          ? rawOf(text).parts
+          : hasRawInput(text)
+          ? joinRaw([text]).parts
+          : [JinjaStringPart('$arg', false)],
+    );
   }
   flushLiteral(source.length);
   return JinjaStringValue(JinjaString(parts));

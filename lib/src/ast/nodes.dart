@@ -52,8 +52,11 @@ class Program extends Statement {
   /// Renders the template. Input-marked text is escaped here, once.
   @override
   JinjaValue execute(Context ctx) {
-    final result = execStatements(body, ctx) as JinjaStringValue;
-    return JinjaStringValue(result.value.escape());
+    final result = renderScope(
+      ctx.environment.values,
+      () => execStatements(body, ctx),
+    );
+    return JinjaStringValue((result as JinjaStringValue).value.escape());
   }
 }
 
@@ -103,7 +106,9 @@ JinjaString _joinOutput(List<JinjaString> pieces) {
 /// `continue` leaving the body discards the captured output, as in llama.cpp.
 JinjaValue _execCaptured(List<Statement> stmts, Context ctx) {
   try {
-    return execStatements(stmts, ctx);
+    final result = execStatements(stmts, ctx) as JinjaStringValue;
+    markRendered(result.value);
+    return result;
   } on LoopSignal catch (signal) {
     signal.output.clear();
     rethrow;
@@ -211,6 +216,7 @@ class ForStatement extends Statement {
       items = iterableVal.items;
     } else if (iterableVal is JinjaStringValue) {
       items = charsOf(iterableVal.value);
+      deriveRendered(JinjaList(items), [iterableVal]);
     }
 
     // Filter items first if testExpr
@@ -716,8 +722,26 @@ class MemberExpression extends Expression {
   String get type => 'MemberExpression';
 
   @override
-  @override
   JinjaValue execute(Context ctx) {
+    JinjaValue? obj;
+    final result = _access(ctx, (value) => obj = value);
+    final source = obj;
+    if (source == null) return result;
+    if (result is JinjaFunction) {
+      if (!holdsFinal(source)) return result;
+      return JinjaFunction(
+        result.name,
+        (args, kwargs) => deriveRendered(result.handler(args, kwargs), [
+          source,
+          ...args,
+          ...kwargs.values,
+        ]),
+      );
+    }
+    return deriveRendered(result, [source]);
+  }
+
+  JinjaValue _access(Context ctx, void Function(JinjaValue) onObject) {
     // Handle slice expressions first, as they are a special case of computed access
     if (computed && property is SliceExpression) {
       final slice = property as SliceExpression;
@@ -726,6 +750,7 @@ class MemberExpression extends Expression {
       final stepVal = slice.step?.execute(ctx);
 
       final obj = object.execute(ctx);
+      onObject(obj);
 
       int? start = (startVal != null && !startVal.isNone)
           ? startVal.asInt
@@ -810,6 +835,7 @@ class MemberExpression extends Expression {
     if (computed || property is IntegerLiteral) {
       // Bracket notation: obj[expr], or an index after a dot: obj.0
       final obj = object.execute(ctx);
+      onObject(obj);
       final prop = property.execute(ctx);
       if (!computed && prop.asInt < 0) {
         throw Exception('Static member property cannot be negative');
@@ -879,6 +905,7 @@ class MemberExpression extends Expression {
       }
       final propName = (property as Identifier).name;
       final obj = object.execute(ctx);
+      onObject(obj);
 
       // Priority: 1. Attributes/Methods, 2. Map keys, 3. Special cases (length)
       final method = resolveMember(obj, propName);
@@ -952,7 +979,10 @@ class CallExpression extends Expression {
       }
     }
 
-    return func.handler(positionals, kwargs);
+    return deriveRendered(func.handler(positionals, kwargs), [
+      ...positionals,
+      ...kwargs.values,
+    ]);
   }
 }
 
@@ -1014,17 +1044,23 @@ class BinaryExpression extends Expression {
         }
         // String repeat? `~` is concat. `*` is repeat in Python.
         if (l is JinjaStringValue && r.isNumeric) {
-          return JinjaStringValue(
-            JinjaString([
-              for (var i = 0; i < r.asInt; i++) ...l.value.parts,
-            ], isSafe: l.isSafe),
+          return deriveRendered(
+            JinjaStringValue(
+              JinjaString([
+                for (var i = 0; i < r.asInt; i++) ...l.value.parts,
+              ], isSafe: l.isSafe),
+            ),
+            [l],
           );
         }
         if (l is JinjaInteger && r is JinjaStringValue) {
-          return JinjaStringValue(
-            JinjaString([
-              for (var i = 0; i < l.value; i++) ...r.value.parts,
-            ], isSafe: r.isSafe),
+          return deriveRendered(
+            JinjaStringValue(
+              JinjaString([
+                for (var i = 0; i < l.value; i++) ...r.value.parts,
+              ], isSafe: r.isSafe),
+            ),
+            [r],
           );
         }
         throw Exception('Invalid operand types for *');
@@ -1194,7 +1230,7 @@ class FilterExpression extends Expression {
 
     if (globalFilters.containsKey(filterName)) {
       final res = globalFilters[filterName]!(args, kwargs);
-      return res;
+      return deriveRendered(res, [...args, ...kwargs.values]);
     }
     throw Exception('Unknown filter: $filterName');
   }
@@ -1250,7 +1286,10 @@ class TestExpression extends Expression {
   }
 }
 
-JinjaStringValue _concat(JinjaValue l, JinjaValue r) {
+JinjaValue _concat(JinjaValue l, JinjaValue r) =>
+    deriveRendered(_join(l, r), [l, r]);
+
+JinjaStringValue _join(JinjaValue l, JinjaValue r) {
   final left = _operand(l);
   final right = _operand(r);
   if (left.isSafe == right.isSafe) return JinjaStringValue(left + right);
