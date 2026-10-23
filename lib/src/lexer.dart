@@ -180,6 +180,12 @@ class Lexer {
     return charCode >= 48 && charCode <= 57;
   }
 
+  static bool _isHexDigit(int charCode) {
+    return isDigit(charCode) ||
+        (charCode >= 65 && charCode <= 70) ||
+        (charCode >= 97 && charCode <= 102);
+  }
+
   static bool isSpace(int charCode) {
     // space, tab, newline, cr, vt, ff
     return charCode == 32 ||
@@ -575,6 +581,35 @@ class Lexer {
             }
             final esc = src[pos++];
             updateLineCol(escStart, pos);
+
+            if (esc == 'x') {
+              if (pos + 1 >= src.length) {
+                throw LexerException(
+                  'Incomplete hexadecimal escape',
+                  src,
+                  pos,
+                  line,
+                  col,
+                );
+              }
+              if (!_isHexDigit(src.codeUnitAt(pos)) ||
+                  !_isHexDigit(src.codeUnitAt(pos + 1))) {
+                throw LexerException(
+                  'Invalid hexadecimal escape',
+                  src,
+                  pos,
+                  line,
+                  col,
+                );
+              }
+              buffer.writeCharCode(
+                int.parse(src.substring(pos, pos + 2), radix: 16),
+              );
+              final hexStart = pos;
+              pos += 2;
+              updateLineCol(hexStart, pos);
+              continue;
+            }
 
             if (escapeChars.containsKey(esc)) {
               buffer.write(escapeChars[esc]);
