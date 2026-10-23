@@ -2,7 +2,7 @@
 
 `Flint.jinja` is the exact `tokenizer.chat_template` returned by `/props` for
 [ggml-org/Flint-GGUF](https://huggingface.co/ggml-org/Flint-GGUF/tree/468307a1b38259e9e4c9d4fe53d4e3b76386572c),
-`Flint-Q4_K_M.gguf`, captured on 2026-10-23. The model is Apache-2.0 licensed.
+`Flint-Q4_K_M.gguf`, captured on 2026-10-23. The model template is Apache-2.0 licensed; see `LICENSE` in this directory.
 `render_upstream.json` records the model revision, model and template SHA-256,
 and each request and prompt returned by `POST /apply-template` from the official
 macOS arm64 llama.cpp b11836 build at
