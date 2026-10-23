@@ -1,6 +1,6 @@
-## Unreleased
+## 1.3.1
 
-- Added `\xHH` hexadecimal string escapes, including non-ASCII characters, matching llama.cpp; malformed or incomplete escapes throw `LexerException`.
+- Fixed `\xHH` hexadecimal escapes in template strings, including Flint's chat template.
 
 ## 1.3.0
 
