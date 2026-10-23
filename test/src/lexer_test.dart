@@ -98,6 +98,91 @@ void main() {
     });
   });
 
+  group('Hexadecimal string escapes', () {
+    // llama.cpp b11836 decodes these as Unicode code points.
+    const cases = {
+      r"{{ '\x00\x41\x7f\x80\xE9\xff' }}": '\u0000A\u007f\u0080éÿ',
+      r'{{ "\x0a\x0D\x09" }}': '\n\r\t',
+      r"{{ '\x414' }}": 'A4',
+      r"{{ '\\x41' }}": r'\x41',
+      r"{{ '\x27\x22\x5c' }}": '\'"\\',
+      r'''{{ "\x22\x27" }}''': '"\'',
+      r'''{{ '\x41\n\t\r\b\f\v\\\'\"' }}''': 'A\n\t\r\b\f\v\\\'"',
+    };
+    cases.forEach((source, expected) {
+      test('decodes ${jsonEncode(source)}', () {
+        final token = Lexer(source).tokenize().tokens[1];
+        expect(token.type, TokenType.stringLiteral);
+        expect(token.value, expected);
+        expect(Template(source).render(), expected);
+      });
+    });
+
+    test('removes NUL from message content as llama.cpp does', () {
+      expect(
+        Template(r'''{{ message.content | replace("\x00", "") }}''').render({
+          'message': {'content': '\u0000a\u0000b\u0000'},
+        }),
+        'ab',
+      );
+    });
+
+    test('tracks source columns rather than decoded characters', () {
+      const source = "before\n{{ '\\x0A' ~ name }}";
+      final tokens = Lexer(source).tokenize().tokens;
+      final string = tokens.firstWhere(
+        (t) => t.type == TokenType.stringLiteral,
+      );
+      final name = tokens.firstWhere((t) => t.value == 'name');
+      expect(string.value, '\n');
+      expect((string.pos, string.line, string.col), (10, 2, 4));
+      expect((name.pos, name.line, name.col), (19, 2, 13));
+    });
+
+    for (final literal in [
+      r"'\x'",
+      r"'\x0'",
+      r'"\x"',
+      r'"\x0"',
+      r"'\x'1'",
+      r'"\x"1"',
+      r"'\xG1'",
+      r"'\x1G'",
+      r"'\x+1'",
+      r"'\x 1'",
+      r"'\x",
+      r"'\x0",
+    ]) {
+      test('rejects malformed ${jsonEncode(literal)} at its hex digits', () {
+        final source = 'before\n{{ $literal';
+        expect(
+          () => Lexer(source).tokenize(),
+          throwsA(
+            isA<LexerException>()
+                .having((e) => e.message, 'message', contains('hexadecimal'))
+                .having((e) => e.source, 'source', source)
+                .having((e) => e.pos, 'position', 13)
+                .having((e) => e.line, 'line', 2)
+                .having((e) => e.col, 'column', 7),
+          ),
+        );
+      });
+    }
+
+    test('rejects a complete escape without a closing quote', () {
+      expect(
+        () => Lexer(r"{{ '\x41").tokenize(),
+        throwsA(
+          isA<LexerException>().having(
+            (e) => e.message,
+            'message',
+            'Unterminated string',
+          ),
+        ),
+      );
+    });
+  });
+
   group('Minus after not', () {
     List<(TokenType, String)> lex(String source) => [
       for (final t in Lexer(source).tokenize().tokens) (t.type, t.value),

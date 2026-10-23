@@ -1,3 +1,7 @@
+## Unreleased
+
+- Added `\xHH` hexadecimal string escapes, including non-ASCII characters, matching llama.cpp; malformed or incomplete escapes throw `LexerException`.
+
 ## 1.3.0
 
 - Fixed a `{% filter %}` block, and a filter on the output of a block `set`, a macro or `caller()`, getting `JinjaString.user` text already escaped: with `x = JinjaString.user('<b>')`, `{% filter upper %}{{ x }}{% endfilter %}` is now `&lt;B&gt;`, not `&LT;B&GT;`, and `{% filter length %}{{ x }}{% endfilter %}` is `3`, not `9`, as in llama.cpp. Input text is now escaped once, when the template outputs it. `| safe` on such output, `{% filter safe %}`, and `| safe` on text made from it or from other safe text escape the input in it, as Jinja2 with autoescape does; `| safe` on a value passed to `render`, or returned by a function passed to it, still outputs it unescaped. A block whose output also contains `| safe` input text is still escaped before the filter runs, as `~` does.
