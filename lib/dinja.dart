@@ -6,6 +6,7 @@
 library;
 
 export 'src/parser.dart' show ParserException;
+export 'src/runtime/builtins.dart' show strftimeNow;
 export 'src/template.dart';
 export 'src/types/jinja_string.dart';
 export 'src/types/value.dart';

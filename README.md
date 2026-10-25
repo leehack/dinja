@@ -151,3 +151,7 @@ dinja implements the Jinja that chat templates use, not all of Jinja2:
 - Some Jinja2 features llama.cpp lacks are missing here too; for example, `'%s'|format(x)` returns `%s`.
 - String literals support `\xHH` with exactly two hexadecimal digits, as in `{{ '\x41\xE9' }}` rendering `Aé`. Values above `0x7f` are Unicode characters, as in llama.cpp; `\\x41` keeps the literal text `\x41`.
 - `strftime_now` formats the system clock's current time in the local time zone, as C `strftime` does in llama.cpp. `%Z` is Dart's `DateTime.timeZoneName`, whose format depends on the platform: on the web it is the browser's name for the zone, such as `Eastern Daylight Time` where llama.cpp gives `EDT`.
+  To supply a deterministic clock for one render, pass
+  `{'strftime_now': strftimeNow(DateTime.utc(2026, 1, 2))}` to `render`.
+  The callable keeps the built-in argument/output checks and input escaping;
+  other renders retain their own clock.
