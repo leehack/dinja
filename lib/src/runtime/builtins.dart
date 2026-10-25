@@ -2081,10 +2081,20 @@ JinjaValue _string(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
   return _asString(args);
 }
 
+/// Creates a `strftime_now` callable that formats [now] instead of wall time.
+///
+/// Pass it as the `strftime_now` value to `Template.render` for a deterministic
+/// render. Other renders keep the default clock. Argument validation, output
+/// limits and input escaping match the built-in function.
+JinjaFunction strftimeNow(DateTime now) =>
+    JinjaFunction('strftime_now', (args, kwargs) => _strftimeAt(args, now));
+
 JinjaValue _strftime_now(
   List<JinjaValue> args,
   Map<String, JinjaValue> kwargs,
-) {
+) => _strftimeAt(args, DateTime.now());
+
+JinjaValue _strftimeAt(List<JinjaValue> args, DateTime now) {
   if (args.isEmpty) {
     throw Exception('strftime_now expects a format string');
   }
@@ -2092,7 +2102,7 @@ JinjaValue _strftime_now(
   if (format is! JinjaStringValue) {
     throw Exception('strftime_now expects a string, got ${format.typeName}');
   }
-  final result = strftime(format.toString(), DateTime.now());
+  final result = strftime(format.toString(), now);
   // llama.cpp formats into a 100-byte buffer and fails on an empty result.
   if (result.isEmpty || utf8.encode(result).length >= 100) {
     throw Exception('strftime_now: failed to format time');

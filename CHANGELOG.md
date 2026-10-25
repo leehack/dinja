@@ -1,3 +1,7 @@
+## 1.3.2
+
+- Add `strftimeNow(DateTime)` for deterministic per-render template clocks, preserving the built-in function's validation and input escaping.
+
 ## 1.3.1
 
 - Fixed `\xHH` hexadecimal escapes in template strings, including Flint's chat template.
