@@ -2086,8 +2086,14 @@ JinjaValue _string(List<JinjaValue> args, Map<String, JinjaValue> kwargs) {
 /// Pass it as the `strftime_now` value to `Template.render` for a deterministic
 /// render. Other renders keep the default clock. Argument validation, output
 /// limits and input escaping match the built-in function.
-JinjaFunction strftimeNow(DateTime now) =>
-    JinjaFunction('strftime_now', (args, kwargs) => _strftimeAt(args, now));
+JinjaFunction strftimeNow(DateTime now) => JinjaFunction('strftime_now', (
+  args,
+  kwargs,
+) {
+  // A context callable is caller-supplied. Preserve rendered input before
+  // its result is registered as supplied, as the built-in call does.
+  return deriveRendered(_strftimeAt(args, now), [...args, ...kwargs.values]);
+});
 
 JinjaValue _strftime_now(
   List<JinjaValue> args,

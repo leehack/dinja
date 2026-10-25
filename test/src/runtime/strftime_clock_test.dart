@@ -67,4 +67,22 @@ void main() {
       }
     },
   );
+
+  test('rendered input stays escaped through safe and derived filters', () {
+    for (final source in [
+      '{% set f %}{{ format }}{% endset %}{{ strftime_now(f)|safe }}',
+      '{% macro f() %}{{ format }}{% endmacro %}{{ strftime_now(f())|safe }}',
+      '{% set f %}{{ format }}{% endset %}'
+          '{{ strftime_now(f)|upper|safe }}',
+    ]) {
+      final template = Template(source);
+      final input = {'format': JinjaString.user('<injected>')};
+      final expected = template.render(input);
+      expect(expected.toLowerCase(), '&lt;injected&gt;');
+      expect(
+        template.render({...input, 'strftime_now': strftimeNow(now)}),
+        expected,
+      );
+    }
+  });
 }
